@@ -2,3 +2,6 @@ uint64 timestamp
 
 float32 height_rate_setpoint
 float32 altitude_setpoint
+float32 equivalent_airspeed_setpoint
+float32 pitch_sp
+float32 thrust_sp

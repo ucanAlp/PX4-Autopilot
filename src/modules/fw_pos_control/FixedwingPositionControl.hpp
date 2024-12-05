@@ -99,6 +99,7 @@
 #include <uORB/topics/orbit_status.h>
 #include <uORB/uORB.h>
 #include <uORB/topics/fw_lateral_control_setpoint.h>
+#include <uORB/topics/fw_longitudinal_control_setpoint.h>
 
 #ifdef CONFIG_FIGURE_OF_EIGHT
 #include "figure_eight/FigureEight.hpp"
@@ -218,6 +219,7 @@ private:
 	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _fw_lateral_ctrl_sub{ORB_ID(fw_lateral_control_setpoint)};
+	uORB::Subscription _fw_longitudinal_ctrl_sub{ORB_ID(fw_longitudinal_control_setpoint)};
 
 	uORB::Publication<vehicle_attitude_setpoint_s> _attitude_sp_pub;
 	uORB::Publication<vehicle_local_position_setpoint_s> _local_pos_sp_pub{ORB_ID(vehicle_local_position_setpoint)};
@@ -233,6 +235,7 @@ private:
 	uORB::PublicationData<flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_sp_pub{ORB_ID(fw_lateral_control_setpoint)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_status_pub{ORB_ID(fw_lateral_control_status)};
+	uORB::PublicationData<fw_longitudinal_control_setpoint_s> _longitudinal_ctrl_status_pub{ORB_ID(fw_longitudinal_control_setpoint)};
 
 	manual_control_setpoint_s _manual_control_setpoint{};
 	position_setpoint_triplet_s _pos_sp_triplet{};
@@ -402,6 +405,15 @@ private:
 	hrt_abstime _time_wind_last_received{0}; // [us]
 
 	// TECS
+
+	struct tecs_limits_s {
+		float pitch_min{0.f};
+		float pitch_max{0.f};
+		float throttle_min{0.f};
+		float throttle_max{0.f};
+		float sink_rate_target{0.f};
+		float climb_rate_target{0.f};
+	} _tecs_limits;
 
 	// total energy control system - airspeed / altitude control
 	TECS _tecs;

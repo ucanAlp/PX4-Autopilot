@@ -49,7 +49,7 @@ using matrix::Vector3f;
 using matrix::wrap_pi;
 
 const fw_lateral_control_setpoint_s empty_lateral_control_setpoint = {.timestamp = 0, .course_setpoint = NAN, .heading_setpoint = NAN, .lateral_acceleration_setpoint = NAN, .roll_sp = NAN};
-
+const fw_longitudinal_control_setpoint_s empty_longitudinal_control_setpoint = {.timestamp = 0, .height_rate_setpoint = NAN, .altitude_setpoint = NAN, .equivalent_airspeed_setpoint = NAN, .pitch_sp = NAN, .thrust_sp = NAN};
 FixedwingPositionControl::FixedwingPositionControl(bool vtol) :
 	ModuleParams(nullptr),
 	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
@@ -992,30 +992,26 @@ FixedwingPositionControl::control_auto_descend(const float control_interval)
 	// Hard-code descend rate to 0.5m/s. This is a compromise to give the system to recover,
 	// but not letting it drift too far away.
 	const float descend_rate = -0.5f;
-	const bool disable_underspeed_handling = false;
 
-	const bool is_low_height = checkLowHeightConditions();
+	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
+		.timestamp = hrt_absolute_time(),
+		.height_rate_setpoint = descend_rate,
+		.altitude_setpoint = _current_altitude,
+		.equivalent_airspeed_setpoint = _performance_model.getCalibratedTrimAirspeed(),
+	};
 
-	tecs_update_pitch_throttle(control_interval,
-				   _current_altitude,
-				   _performance_model.getCalibratedTrimAirspeed(),
-				   radians(_param_fw_p_lim_min.get()),
-				   radians(_param_fw_p_lim_max.get()),
-				   _param_fw_thr_min.get(),
-				   _param_fw_thr_max.get(),
-				   _param_sinkrate_target.get(),
-				   _param_climbrate_target.get(),
-				   is_low_height,
-				   disable_underspeed_handling,
-				   descend_rate);
+	_longitudinal_ctrl_status_pub.publish(fw_longitudinal_control_sp);
+
+	_tecs_limits.pitch_min = radians(_param_fw_p_lim_min.get());
+	_tecs_limits.pitch_max = radians(_param_fw_p_lim_max.get());
+	_tecs_limits.throttle_min = _param_fw_thr_min.get();
+	_tecs_limits.throttle_max = (_landed || !_local_pos.v_z_valid) ? _param_fw_thr_min.get() : _param_fw_thr_max.get();
+	_tecs_limits.climb_rate_target = _param_climbrate_target.get();
+	_tecs_limits.sink_rate_target = _param_sinkrate_target.get();
+
 
 	const float roll_body = math::radians(_param_nav_gpsf_r.get()); // open loop loiter bank angle
 	const float yaw_body = 0.f;
-
-	// Special case: if vz estimate is invalid we cannot control height rate anymore. To prevent a
-	// "climb-away" we set the thrust to MIN in that case.
-	_att_sp.thrust_body[0] = (_landed
-				  || !_local_pos.v_z_valid) ? _param_fw_thr_min.get() : min(get_tecs_thrust(), _param_fw_thr_max.get());
 
 	const float pitch_body = get_tecs_pitch();
 	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
@@ -2308,6 +2304,13 @@ FixedwingPositionControl::control_manual_altitude(const float control_interval, 
 		throttle_max = 0.0f;
 	}
 
+	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
+		.timestamp = hrt_absolute_time(),
+		.height_rate_setpoint = height_rate_sp,
+		.altitude_setpoint = _current_altitude,
+	};
+
+	_longitudinal_ctrl_status_pub.publish(fw_longitudinal_control_sp);
 
 	const bool is_low_height = checkLowHeightConditions();
 
@@ -2542,9 +2545,20 @@ void FixedwingPositionControl::control_backtransition_line_follow(const Vector2f
 
 	const float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
 
-	// these values are overriden by transition logic
-	_att_sp.thrust_body[0] = _param_fw_thr_min.get();
-	const float pitch_body = 0.0f;
+
+	tecs_update_pitch_throttle(control_interval,
+				   pos_sp_curr.alt,
+				   target_airspeed,
+				   radians(_param_fw_p_lim_min.get()),
+				   radians(_param_fw_p_lim_max.get()),
+				   _param_fw_thr_min.get(),
+				   _param_fw_thr_max.get(),
+				   _param_sinkrate_target.get(),
+				   _param_climbrate_target.get(),
+				   is_low_height);
+
+	_att_sp.thrust_body[0] = (_landed) ? _param_fw_thr_min.get() : min(get_tecs_thrust(), _param_fw_thr_max.get());
+	const float pitch_body = get_tecs_pitch();
 
 	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
 	attitude_setpoint.copyTo(_att_sp.q_d);
@@ -2860,6 +2874,26 @@ FixedwingPositionControl::Run()
 			}
 		}
 
+		fw_longitudinal_control_setpoint_s longitudinal_sp = {empty_longitudinal_control_setpoint};
+
+		float pitch_sp{NAN};
+
+		if (_fw_longitudinal_ctrl_sub.update(&longitudinal_sp)) {
+			tecs_update_pitch_throttle(control_interval, longitudinal_sp.altitude_setpoint,
+						   longitudinal_sp.equivalent_airspeed_setpoint,
+						   _tecs_limits.pitch_min,
+						   _tecs_limits.pitch_max,
+						   _tecs_limits.throttle_min,
+						   _tecs_limits.throttle_max,
+						   _tecs_limits.sink_rate_target,
+						   _tecs_limits.climb_rate_target,
+						   checkLowHeightConditions(),
+						   false,
+						   longitudinal_sp.height_rate_setpoint
+						  );
+			pitch_sp = _tecs.get_pitch_setpoint();
+		}
+
 
 		fw_lateral_control_setpoint_s sp = {empty_lateral_control_setpoint};
 		float roll_sp {NAN};
@@ -2905,9 +2939,9 @@ FixedwingPositionControl::Run()
 
 		if (_control_mode_current != FW_POSCTRL_MODE_OTHER) {
 			Eulerf attitude_setpoint(Quatf(_att_sp.q_d));
-			//float roll_body = PX4_ISFINITE(roll_sp) ? roll_sp : attitude_setpoint.phi();
-			float roll_body = attitude_setpoint.phi();
-			float pitch_body = attitude_setpoint.theta();
+			float roll_body = PX4_ISFINITE(roll_sp) ? roll_sp : attitude_setpoint.phi();
+			//float roll_body = attitude_setpoint.phi();
+			float pitch_body = PX4_ISFINITE(pitch_sp) ? pitch_sp : attitude_setpoint.theta();
 			float yaw_body = attitude_setpoint.psi();
 
 			if (_control_mode.flag_control_manual_enabled) {
