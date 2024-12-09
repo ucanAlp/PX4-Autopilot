@@ -415,6 +415,10 @@ private:
 		float climb_rate_target{0.f};
 	} _tecs_limits;
 
+	struct lateral_control_limits_s {
+		float roll_max{0.f};
+	} _lateral_limits;
+
 	// total energy control system - airspeed / altitude control
 	TECS _tecs;
 
@@ -774,6 +778,10 @@ private:
 
 	void publishOrbitStatus(const position_setpoint_s pos_sp);
 
+	float mapLateralAccelerationToRollAngle(const float lateral_acceleration, hrt_abstime now);
+	float modifyPitchSetpoint(float pitch_sp);
+	float modifyThrustSetpoint(float thrust);
+
 	SlewRate<float> _airspeed_slew_rate_controller;
 	SlewRate<float> _roll_slew_rate;
 
@@ -807,6 +815,8 @@ private:
 	 * @return Constrained roll angle setpoint [rad]
 	 */
 	float constrainRollNearGround(const float roll_setpoint, const float altitude, const float terrain_altitude) const;
+
+	float getMaxRollAngleNearGround(const float altitude, const float terrain_altitude) const;
 
 	/**
 	 * @brief Calculates the touchdown position for landing with optional manual lateral adjustments.
