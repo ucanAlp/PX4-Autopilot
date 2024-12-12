@@ -1,0 +1,8 @@
+uint64 timestamp
+
+float32 pitch_min
+float32 pitch_max
+float32 throttle_min
+float32 throttle_max
+float32 climb_rate_max
+float32 sink_rate_max

@@ -56,7 +56,7 @@
 #include <drivers/drv_hrt.h>
 #include <lib/geo/geo.h>
 #include <lib/atmosphere/atmosphere.h>
-#include <lib/npfg/npfg.hpp>
+#include <lib/npfg/DirectionalGuidance.hpp>
 #include <lib/tecs/TECS.hpp>
 #include <lib/mathlib/mathlib.h>
 #include <lib/perf/perf_counter.h>
@@ -100,6 +100,7 @@
 #include <uORB/uORB.h>
 #include <uORB/topics/fw_lateral_control_setpoint.h>
 #include <uORB/topics/fw_longitudinal_control_setpoint.h>
+#include <uORB/topics/longitudinal_control_limits.h>
 
 #ifdef CONFIG_FIGURE_OF_EIGHT
 #include "figure_eight/FigureEight.hpp"
@@ -177,8 +178,6 @@ static constexpr uint64_t ROLL_WARNING_TIMEOUT = 2_s;
 // [-] Can-run threshold needed to trigger the roll-constraining failsafe warning
 static constexpr float ROLL_WARNING_CAN_RUN_THRESHOLD = 0.9f;
 
-// [s] slew rate with which we change altitude time constant
-static constexpr float TECS_ALT_TIME_CONST_SLEW_RATE = 1.0f;
 
 class FixedwingPositionControl final : public ModuleBase<FixedwingPositionControl>, public ModuleParams,
 	public px4::WorkItem
@@ -235,7 +234,8 @@ private:
 	uORB::PublicationData<flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_sp_pub{ORB_ID(fw_lateral_control_setpoint)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_status_pub{ORB_ID(fw_lateral_control_status)};
-	uORB::PublicationData<fw_longitudinal_control_setpoint_s> _longitudinal_ctrl_status_pub{ORB_ID(fw_longitudinal_control_setpoint)};
+	uORB::PublicationData<fw_longitudinal_control_setpoint_s> _longitudinal_ctrl_sp_pub{ORB_ID(fw_longitudinal_control_setpoint)};
+	uORB::PublicationData<longitudinal_control_limits_s> _longitudinal_ctrl_limits_pub{ORB_ID(longitudinal_control_limits)};
 
 	manual_control_setpoint_s _manual_control_setpoint{};
 	position_setpoint_triplet_s _pos_sp_triplet{};
@@ -406,14 +406,6 @@ private:
 
 	// TECS
 
-	struct tecs_limits_s {
-		float pitch_min{0.f};
-		float pitch_max{0.f};
-		float throttle_min{0.f};
-		float throttle_max{0.f};
-		float sink_rate_target{0.f};
-		float climb_rate_target{0.f};
-	} _tecs_limits;
 
 	struct lateral_control_limits_s {
 		float roll_max{0.f};
@@ -424,8 +416,6 @@ private:
 
 	bool _tecs_is_running{false};
 
-	// Smooths changes in the altitude tracking error time constant value
-	SlewRate<float> _tecs_alt_time_const_slew_rate;
 
 	// VTOL / TRANSITION
 	bool _is_vtol_tailsitter{false};
@@ -443,7 +433,7 @@ private:
 	matrix::Vector2f _closest_point_on_path;
 
 	// nonlinear path following guidance - lateral-directional position control
-	NPFG _npfg;
+	DirectionalGuidance _directional_guidance;
 	bool _need_report_npfg_uncertain_condition{false}; ///< boolean if reporting of uncertain npfg output condition is needed
 	hrt_abstime _time_since_first_reduced_roll{0U}; ///< absolute time since start when entering reduced roll angle for the first time
 	hrt_abstime _time_since_last_npfg_call{0U}; 	///< absolute time since start when the npfg reduced roll angle calculations was last performed
@@ -495,17 +485,9 @@ private:
 
 	void status_publish();
 	void landing_status_publish();
-	void tecs_status_publish(float alt_sp, float equivalent_airspeed_sp, float true_airspeed_derivative_raw,
-				 float throttle_trim);
+
 	void publishLocalPositionSetpoint(const position_setpoint_s &current_waypoint);
 	float getLoadFactor();
-
-	/**
-	 * @brief Get the NPFG roll setpoint with mitigation strategy if npfg is not certain about its output
-	 *
-	 * @return roll setpoint
-	 */
-	float getCorrectedNpfgRollSetpoint();
 
 	/**
 	 * @brief Sets the landing abort status and publishes landing status.
@@ -744,9 +726,6 @@ private:
 	void control_backtransition_line_follow(const Vector2f &ground_speed,
 						const position_setpoint_s &pos_sp_curr);
 
-	float get_tecs_pitch();
-	float get_tecs_thrust();
-
 	float get_manual_airspeed_setpoint();
 
 	/**
@@ -784,27 +763,6 @@ private:
 
 	SlewRate<float> _airspeed_slew_rate_controller;
 	SlewRate<float> _roll_slew_rate;
-
-	/**
-	 * @brief A wrapper function to call the TECS implementation
-	 *
-	 * @param control_interval Time since the last position control update [s]
-	 * @param alt_sp Altitude setpoint, AMSL [m]
-	 * @param airspeed_sp Calibrated airspeed setpoint [m/s]
-	 * @param pitch_min_rad Nominal pitch angle command minimum [rad]
-	 * @param pitch_max_rad Nominal pitch angle command maximum [rad]
-	 * @param throttle_min Minimum throttle command [0,1]
-	 * @param throttle_max Maximum throttle command [0,1]
-	 * @param desired_max_sink_rate The desired max sink rate commandable when altitude errors are large [m/s]
-	 * @param desired_max_climb_rate The desired max climb rate commandable when altitude errors are large [m/s]
-	 * @param is_low_height Define whether we are in low-height flight for tighter altitude tracking
-	 * @param disable_underspeed_detection True if underspeed detection should be disabled
-	 * @param hgt_rate_sp Height rate setpoint [m/s]
-	 */
-	void tecs_update_pitch_throttle(const float control_interval, float alt_sp, float airspeed_sp, float pitch_min_rad,
-					float pitch_max_rad, float throttle_min, float throttle_max,
-					const float desired_max_sink_rate, const float desired_max_climb_rate, const bool is_low_height,
-					bool disable_underspeed_detection = false, float hgt_rate_sp = NAN);
 
 	/**
 	 * @brief Constrains the roll angle setpoint near ground to avoid wingtip strike.
@@ -1008,7 +966,6 @@ private:
 		(ParamFloat<px4::params::FW_LND_FL_PMAX>) _param_fw_lnd_fl_pmax,
 		(ParamFloat<px4::params::FW_LND_FL_PMIN>) _param_fw_lnd_fl_pmin,
 		(ParamFloat<px4::params::FW_LND_FLALT>) _param_fw_lnd_flalt,
-		(ParamFloat<px4::params::FW_LND_THRTC_SC>) _param_fw_thrtc_sc,
 		(ParamFloat<px4::params::FW_T_THR_LOW_HGT>) _param_fw_t_thr_low_hgt,
 		(ParamBool<px4::params::FW_LND_EARLYCFG>) _param_fw_lnd_earlycfg,
 		(ParamInt<px4::params::FW_LND_USETER>) _param_fw_lnd_useter,
@@ -1016,30 +973,13 @@ private:
 		(ParamFloat<px4::params::FW_P_LIM_MAX>) _param_fw_p_lim_max,
 		(ParamFloat<px4::params::FW_P_LIM_MIN>) _param_fw_p_lim_min,
 
-		(ParamFloat<px4::params::FW_T_HRATE_FF>) _param_fw_t_hrate_ff,
-		(ParamFloat<px4::params::FW_T_ALT_TC>) _param_fw_t_h_error_tc,
-		(ParamFloat<px4::params::FW_T_F_ALT_ERR>) _param_fw_t_fast_alt_err,
-		(ParamFloat<px4::params::FW_T_THR_INTEG>) _param_fw_t_thr_integ,
-		(ParamFloat<px4::params::FW_T_I_GAIN_PIT>) _param_fw_t_I_gain_pit,
-		(ParamFloat<px4::params::FW_T_PTCH_DAMP>) _param_fw_t_ptch_damp,
-		(ParamFloat<px4::params::FW_T_RLL2THR>) _param_fw_t_rll2thr,
-		(ParamFloat<px4::params::FW_T_SINK_MAX>) _param_fw_t_sink_max,
-		(ParamFloat<px4::params::FW_T_SPDWEIGHT>) _param_fw_t_spdweight,
-		(ParamFloat<px4::params::FW_T_TAS_TC>) _param_fw_t_tas_error_tc,
-		(ParamFloat<px4::params::FW_T_THR_DAMPING>) _param_fw_t_thr_damping,
-		(ParamFloat<px4::params::FW_T_VERT_ACC>) _param_fw_t_vert_acc,
-		(ParamFloat<px4::params::FW_T_STE_R_TC>) _param_ste_rate_time_const,
-		(ParamFloat<px4::params::FW_T_SEB_R_FF>) _param_seb_rate_ff,
 		(ParamFloat<px4::params::FW_T_CLMB_R_SP>) _param_climbrate_target,
 		(ParamFloat<px4::params::FW_T_SINK_R_SP>) _param_sinkrate_target,
-		(ParamFloat<px4::params::FW_T_SPD_STD>) _param_speed_standard_dev,
-		(ParamFloat<px4::params::FW_T_SPD_DEV_STD>) _param_speed_rate_standard_dev,
-		(ParamFloat<px4::params::FW_T_SPD_PRC_STD>) _param_process_noise_standard_dev,
+		(ParamFloat<px4::params::FW_T_SINK_MAX>) _param_fw_t_sink_max,
 
 		(ParamFloat<px4::params::FW_THR_IDLE>) _param_fw_thr_idle,
 		(ParamFloat<px4::params::FW_THR_MAX>) _param_fw_thr_max,
 		(ParamFloat<px4::params::FW_THR_MIN>) _param_fw_thr_min,
-		(ParamFloat<px4::params::FW_THR_SLEW_MAX>) _param_fw_thr_slew_max,
 
 		(ParamFloat<px4::params::FW_FLAPS_LND_SCL>) _param_fw_flaps_lnd_scl,
 		(ParamFloat<px4::params::FW_FLAPS_TO_SCL>) _param_fw_flaps_to_scl,

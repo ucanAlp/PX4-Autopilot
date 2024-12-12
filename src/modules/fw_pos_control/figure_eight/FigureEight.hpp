@@ -45,7 +45,7 @@
 #include <px4_platform_common/param.h>
 #include <lib/matrix/matrix/math.hpp>
 
-#include "lib/npfg/npfg.hpp"
+#include "lib/npfg/DirectionalGuidance.hpp"
 
 class FigureEight : public ModuleParams
 {
@@ -89,7 +89,7 @@ public:
 	 * @param[in] wind_vel is the reference to the parent wind velocity [m/s].
 	 * @param[in] eas2tas is the reference to the parent indicated airspeed to true airspeed conversion.
 	 */
-	FigureEight(NPFG &npfg, matrix::Vector2f &wind_vel, float &eas2tas);
+	FigureEight(DirectionalGuidance &directional_guidance, matrix::Vector2f &wind_vel, float &eas2tas);
 
 	/**
 	 * @brief reset the figure eight pattern.
@@ -238,7 +238,7 @@ private:
 	 * @brief npfg lateral control object.
 	 *
 	 */
-	NPFG &_npfg;
+	DirectionalGuidance &_directional_guidance;
 
 	/**
 	 * @brief Wind velocity in [m/s].

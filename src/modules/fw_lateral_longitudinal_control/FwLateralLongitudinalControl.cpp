@@ -1,0 +1,533 @@
+//
+// Created by roman on 12.12.24.
+//
+#include "FwLateralLongitudinalControl.hpp"
+
+using math::constrain;
+using math::max;
+using math::min;
+using math::radians;
+
+using matrix::Dcmf;
+using matrix::Eulerf;
+using matrix::Quatf;
+using matrix::Vector2f;
+using matrix::Vector2d;
+using matrix::Vector3f;
+using matrix::wrap_pi;
+
+// [m/s] maximum reference altitude rate threshhold
+static constexpr float MAX_ALT_REF_RATE_FOR_LEVEL_FLIGHT = 0.1f;
+// [us] time after which the wind estimate is disabled if no longer updating
+static constexpr hrt_abstime WIND_EST_TIMEOUT = 10_s;
+// [s] slew rate with which we change altitude time constant
+static constexpr float TECS_ALT_TIME_CONST_SLEW_RATE = 1.0f;
+
+const fw_lateral_control_setpoint_s empty_lateral_control_setpoint = {.timestamp = 0, .course_setpoint = NAN, .heading_setpoint = NAN, .lateral_acceleration_setpoint = NAN, .roll_sp = NAN};
+const fw_longitudinal_control_setpoint_s empty_longitudinal_control_setpoint = {.timestamp = 0, .height_rate_setpoint = NAN, .altitude_setpoint = NAN, .equivalent_airspeed_setpoint = NAN, .pitch_sp = NAN, .thrust_sp = NAN};
+FwLateralLongitudinalControl::FwLateralLongitudinalControl(bool is_vtol) :
+	ModuleParams(nullptr),
+	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
+	_attitude_sp_pub(is_vtol ? ORB_ID(fw_virtual_attitude_setpoint) : ORB_ID(vehicle_attitude_setpoint))
+{
+
+}
+
+FwLateralLongitudinalControl::~FwLateralLongitudinalControl()
+{
+}
+void
+FwLateralLongitudinalControl::parameters_update()
+{
+	updateParams();
+	_tecs.set_max_climb_rate(_performance_model.getMaximumClimbRate(_air_density));
+	_tecs.set_max_sink_rate(_param_fw_t_sink_max.get());
+	_tecs.set_min_sink_rate(_performance_model.getMinimumSinkRate(_air_density));
+	_tecs.set_speed_weight(_param_fw_t_spdweight.get());
+	_tecs.set_equivalent_airspeed_trim(_performance_model.getCalibratedTrimAirspeed());
+	_tecs.set_equivalent_airspeed_min(_performance_model.getMinimumCalibratedAirspeed());
+	_tecs.set_equivalent_airspeed_max(_performance_model.getMaximumCalibratedAirspeed());
+	_tecs.set_throttle_damp(_param_fw_t_thr_damping.get());
+	_tecs.set_integrator_gain_throttle(_param_fw_t_thr_integ.get());
+	_tecs.set_integrator_gain_pitch(_param_fw_t_I_gain_pit.get());
+	_tecs.set_throttle_slewrate(_param_fw_thr_slew_max.get());
+	_tecs.set_vertical_accel_limit(_param_fw_t_vert_acc.get());
+	_tecs.set_roll_throttle_compensation(_param_fw_t_rll2thr.get());
+	_tecs.set_pitch_damping(_param_fw_t_ptch_damp.get());
+	_tecs.set_altitude_error_time_constant(_param_fw_t_h_error_tc.get());
+	_tecs.set_fast_descend_altitude_error(_param_fw_t_fast_alt_err.get());
+	_tecs.set_altitude_rate_ff(_param_fw_t_hrate_ff.get());
+	_tecs.set_airspeed_error_time_constant(_param_fw_t_tas_error_tc.get());
+	_tecs.set_ste_rate_time_const(_param_ste_rate_time_const.get());
+	_tecs.set_seb_rate_ff_gain(_param_seb_rate_ff.get());
+	_tecs.set_airspeed_measurement_std_dev(_param_speed_standard_dev.get());
+	_tecs.set_airspeed_rate_measurement_std_dev(_param_speed_rate_standard_dev.get());
+	_tecs.set_airspeed_filter_process_std_dev(_param_process_noise_standard_dev.get());
+
+	_performance_model.runSanityChecks();
+
+	_performance_model.updateParameters();
+	_roll_slew_rate.setSlewRate(radians(_param_fw_pn_r_slew_max.get()));
+
+	_tecs_alt_time_const_slew_rate.setSlewRate(TECS_ALT_TIME_CONST_SLEW_RATE);
+	_tecs_alt_time_const_slew_rate.setForcedValue(_param_fw_t_h_error_tc.get() * _param_fw_thrtc_sc.get());
+}
+
+void FwLateralLongitudinalControl::Run()
+{
+	if (should_exit()) {
+		_local_pos_sub.unregisterCallback();
+		exit_and_cleanup();
+		return;
+	}
+
+	//perf_begin(_loop_perf);
+
+	/* only run controller if position changed */
+	// check for parameter updates
+	if (_parameter_update_sub.updated()) {
+		// clear update
+		parameter_update_s pupdate;
+		_parameter_update_sub.copy(&pupdate);
+
+		// update parameters from storage
+		parameters_update();
+	}
+
+	if (_local_pos_sub.update(&_local_pos)) {
+
+		const float control_interval = math::constrain((_local_pos.timestamp - _last_time_loop_ran) * 1e-6f,
+					       0.001f, 0.1f);
+		_last_time_loop_ran = _local_pos.timestamp;
+		fw_longitudinal_control_setpoint_s longitudinal_sp = {empty_longitudinal_control_setpoint};
+
+		if (_long_control_limits_sub.updated()) {
+			_long_control_limits_sub.update(&_long_control_limits);
+		}
+
+		_air_density = PX4_ISFINITE(_vehicle_air_data_sub.get().rho) ? _vehicle_air_data_sub.get().rho : _air_density;
+
+		update_control_state();
+
+		float pitch_sp{NAN};
+		float thrust_sp{NAN};
+
+		bool update = false;
+
+		_fw_longitudinal_ctrl_sub.copy(&longitudinal_sp);
+
+		if (longitudinal_sp.timestamp > 0 && hrt_elapsed_time(&longitudinal_sp.timestamp) < 1_s) {
+			tecs_update_pitch_throttle(control_interval, longitudinal_sp.altitude_setpoint,
+						   PX4_ISFINITE(longitudinal_sp.equivalent_airspeed_setpoint) ? longitudinal_sp.equivalent_airspeed_setpoint :
+						   _performance_model.getCalibratedTrimAirspeed(),
+						   _long_control_limits.pitch_min,
+						   _long_control_limits.pitch_max,
+						   _long_control_limits.throttle_min,
+						   _long_control_limits.throttle_max,
+						   _long_control_limits.sink_rate_max,
+						   _long_control_limits.climb_rate_max,
+						   false, // TODO, replace
+						   false, // TODO, replace
+						   longitudinal_sp.height_rate_setpoint
+						  );
+			pitch_sp = _tecs.get_pitch_setpoint();
+			thrust_sp = _tecs.get_throttle_setpoint();
+			update = true;
+		}
+
+
+		fw_lateral_control_setpoint_s sp = {empty_lateral_control_setpoint};
+		float roll_sp {NAN};
+
+		_fw_lateral_ctrl_sub.copy(&sp);
+
+		if (sp.timestamp > 0 && hrt_elapsed_time(&sp.timestamp) < 1_s) {
+			float heading_setpoint{NAN};
+			float lateral_accel_sp {NAN};
+
+			if (PX4_ISFINITE(sp.course_setpoint)) {
+				heading_setpoint = _course_to_airspeed.mapBearingSetpointToHeadingSetpoint(
+							   sp.course_setpoint, _lateral_control_state.wind_speed);
+			}
+
+			if (PX4_ISFINITE(sp.heading_setpoint)) {
+				heading_setpoint = PX4_ISFINITE(heading_setpoint) ? heading_setpoint + sp.heading_setpoint : sp.heading_setpoint;
+			}
+
+			if (PX4_ISFINITE(heading_setpoint)) {
+				Vector2f airspeed_ref = _lateral_control_state.ground_speed - _lateral_control_state.wind_speed;
+				const float heading = atan2(airspeed_ref(1), airspeed_ref(0));
+				lateral_accel_sp = _airspeed_ref_control.controlHeading(heading_setpoint, heading, airspeed_ref.norm());
+			}
+
+			if (PX4_ISFINITE(sp.lateral_acceleration_setpoint)) {
+				lateral_accel_sp = PX4_ISFINITE(lateral_accel_sp) ? lateral_accel_sp + sp.lateral_acceleration_setpoint :
+						   sp.lateral_acceleration_setpoint;
+			}
+
+			if (PX4_ISFINITE(lateral_accel_sp)) {
+				roll_sp = mapLateralAccelerationToRollAngle(lateral_accel_sp);
+			}
+
+			fw_lateral_control_setpoint_s status = {
+				.timestamp = sp.timestamp,
+				.course_setpoint = sp.course_setpoint,
+				.heading_setpoint = heading_setpoint,
+				.lateral_acceleration_setpoint = lateral_accel_sp,
+				.roll_sp = roll_sp // TODO: just for logging, can be removed later
+			};
+
+			_lateral_ctrl_status_pub.publish(status);
+			update = true;
+		}
+
+
+		if (update) {
+			float roll_body = PX4_ISFINITE(roll_sp) ? roll_sp : 0.0f;
+			float pitch_body = PX4_ISFINITE(pitch_sp) ? pitch_sp : 0.0f;
+			float yaw_body = _yaw;
+			float thrust_body_x = PX4_ISFINITE(thrust_sp) ? thrust_sp : 0.0f;
+
+			if (_control_mode_sub.get().flag_control_manual_enabled) {
+				roll_body = constrain(roll_body, -radians(_param_fw_r_lim.get()),
+						      radians(_param_fw_r_lim.get()));
+				pitch_body = constrain(pitch_body, radians(_param_fw_p_lim_min.get()),
+						       radians(_param_fw_p_lim_max.get()));
+			}
+
+			if (_control_mode_sub.get().flag_control_position_enabled ||
+			    _control_mode_sub.get().flag_control_velocity_enabled ||
+			    _control_mode_sub.get().flag_control_acceleration_enabled ||
+			    _control_mode_sub.get().flag_control_altitude_enabled ||
+			    _control_mode_sub.get().flag_control_climb_rate_enabled) {
+
+				// roll slew rate
+				roll_body = _roll_slew_rate.update(roll_body, control_interval);
+
+				_att_sp.timestamp = hrt_absolute_time();
+				const Quatf q(Eulerf(roll_body, pitch_body, yaw_body));
+				q.copyTo(_att_sp.q_d);
+
+				_att_sp.thrust_body[0] = thrust_body_x;
+				_attitude_sp_pub.publish(_att_sp);
+			}
+
+		}
+
+	}
+}
+void
+FwLateralLongitudinalControl::tecs_update_pitch_throttle(const float control_interval, float alt_sp, float airspeed_sp,
+		float pitch_min_rad, float pitch_max_rad, float throttle_min, float throttle_max,
+		const float desired_max_sinkrate, const float desired_max_climbrate, const bool is_low_height,
+		bool disable_underspeed_detection, float hgt_rate_sp)
+{
+	// do not run TECS if vehicle is a VTOL and we are in rotary wing mode or in transition
+	if (_vehicle_status_sub.get().is_vtol
+	    && (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING
+		|| _vehicle_status_sub.get().in_transition_mode)) {
+		_tecs_is_running = false;
+		return;
+
+	} else {
+		_tecs_is_running = true;
+	}
+
+	/* update TECS vehicle state estimates */
+
+
+	const float throttle_trim_compensated = _performance_model.getTrimThrottle(throttle_min,
+						throttle_max, airspeed_sp, _air_density);
+
+	/* No underspeed protection in landing mode */
+	_tecs.set_detect_underspeed_enabled(!disable_underspeed_detection);
+
+	//updateTECSAltitudeTimeConstant(is_low_height, control_interval);
+
+	// HOTFIX: the airspeed rate estimate using acceleration in body-forward direction has shown to lead to high biases
+	// when flying tight turns. It's in this case much safer to just set the estimated airspeed rate to 0.
+	const float airspeed_rate_estimate = 0.f;
+
+	_tecs.update(_long_control_state.pitch_rad - radians(_param_fw_psp_off.get()),
+		     _long_control_state.altitude_msl,
+		     alt_sp,
+		     airspeed_sp,
+		     _long_control_state.airspeed_eas,
+		     _long_control_state.eas2tas,
+		     throttle_min,
+		     throttle_max,
+		     throttle_trim_compensated,
+		     pitch_min_rad - radians(_param_fw_psp_off.get()),
+		     pitch_max_rad - radians(_param_fw_psp_off.get()),
+		     desired_max_climbrate,
+		     desired_max_sinkrate,
+		     airspeed_rate_estimate,
+		     _long_control_state.height_rate,
+		     hgt_rate_sp);
+
+	tecs_status_publish(alt_sp, airspeed_sp, airspeed_rate_estimate, throttle_trim_compensated);
+
+	if (_tecs_is_running && !_vehicle_status_sub.get().in_transition_mode
+	    && (_vehicle_status_sub.get().vehicle_type == vehicle_status_s::VEHICLE_TYPE_FIXED_WING)) {
+		const TECS::DebugOutput &tecs_output{_tecs.getStatus()};
+
+		// Check level flight: the height rate setpoint is not set or set to 0 and we are close to the target altitude and target altitude is not moving
+		if ((fabsf(tecs_output.height_rate_reference) < MAX_ALT_REF_RATE_FOR_LEVEL_FLIGHT) &&
+		    fabsf(_long_control_state.altitude_msl - tecs_output.altitude_reference) < _param_nav_fw_alt_rad.get()) {
+			_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_LEVEL;
+
+		} else if (((tecs_output.altitude_reference - _long_control_state.altitude_msl) >= _param_nav_fw_alt_rad.get()) ||
+			   (tecs_output.height_rate_reference >= MAX_ALT_REF_RATE_FOR_LEVEL_FLIGHT)) {
+			_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_CLIMB;
+
+		} else if (((_long_control_state.altitude_msl - tecs_output.altitude_reference) >= _param_nav_fw_alt_rad.get()) ||
+			   (tecs_output.height_rate_reference <= -MAX_ALT_REF_RATE_FOR_LEVEL_FLIGHT)) {
+			_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_DESCEND;
+
+		} else {
+			//We can't infer the flight phase , do nothing, estimation is reset at each step
+		}
+	}
+}
+
+void
+FwLateralLongitudinalControl::tecs_status_publish(float alt_sp, float equivalent_airspeed_sp,
+		float true_airspeed_derivative_raw, float throttle_trim)
+{
+	tecs_status_s tecs_status{};
+
+	const TECS::DebugOutput &debug_output{_tecs.getStatus()};
+
+	tecs_status.altitude_sp = alt_sp;
+	tecs_status.altitude_reference = debug_output.altitude_reference;
+	tecs_status.altitude_time_constant = _tecs.get_altitude_error_time_constant();
+	tecs_status.height_rate_reference = debug_output.height_rate_reference;
+	tecs_status.height_rate_direct = debug_output.height_rate_direct;
+	tecs_status.height_rate_setpoint = debug_output.control.altitude_rate_control;
+	tecs_status.height_rate = -_local_pos.vz;
+	tecs_status.equivalent_airspeed_sp = equivalent_airspeed_sp;
+	tecs_status.true_airspeed_sp = debug_output.true_airspeed_sp;
+	tecs_status.true_airspeed_filtered = debug_output.true_airspeed_filtered;
+	tecs_status.true_airspeed_derivative_sp = debug_output.control.true_airspeed_derivative_control;
+	tecs_status.true_airspeed_derivative = debug_output.true_airspeed_derivative;
+	tecs_status.true_airspeed_derivative_raw = true_airspeed_derivative_raw;
+	tecs_status.total_energy_rate = debug_output.control.total_energy_rate_estimate;
+	tecs_status.total_energy_balance_rate = debug_output.control.energy_balance_rate_estimate;
+	tecs_status.total_energy_rate_sp = debug_output.control.total_energy_rate_sp;
+	tecs_status.total_energy_balance_rate_sp = debug_output.control.energy_balance_rate_sp;
+	tecs_status.throttle_integ = debug_output.control.throttle_integrator;
+	tecs_status.pitch_integ = debug_output.control.pitch_integrator;
+	tecs_status.throttle_sp = _tecs.get_throttle_setpoint();
+	tecs_status.pitch_sp_rad = _tecs.get_pitch_setpoint();
+	tecs_status.throttle_trim = throttle_trim;
+	tecs_status.underspeed_ratio = _tecs.get_underspeed_ratio();
+	tecs_status.fast_descend_ratio = debug_output.fast_descend;
+
+	tecs_status.timestamp = hrt_absolute_time();
+
+	_tecs_status_pub.publish(tecs_status);
+}
+
+int FwLateralLongitudinalControl::task_spawn(int argc, char *argv[])
+{
+	bool is_vtol = false;
+
+	if (argc > 1) {
+		if (strcmp(argv[1], "is_vtol") == 0) {
+			is_vtol = true;
+		}
+	}
+
+	FwLateralLongitudinalControl *instance = new FwLateralLongitudinalControl(is_vtol);
+
+	if (instance) {
+		_object.store(instance);
+		_task_id = task_id_is_work_queue;
+
+		if (instance->init()) {
+			return PX4_OK;
+		}
+
+	} else {
+		PX4_ERR("alloc failed");
+	}
+
+	delete instance;
+	_object.store(nullptr);
+	_task_id = -1;
+
+	return PX4_ERROR;
+}
+
+bool
+FwLateralLongitudinalControl::init()
+{
+	if (!_local_pos_sub.registerCallback()) {
+		PX4_ERR("callback registration failed");
+		return false;
+	}
+
+	return true;
+}
+
+int FwLateralLongitudinalControl::custom_command(int argc, char *argv[])
+{
+	return print_usage("unknown command");
+}
+
+int FwLateralLongitudinalControl::print_usage(const char *reason)
+{
+	if (reason) {
+		PX4_WARN("%s\n", reason);
+	}
+
+	PRINT_MODULE_DESCRIPTION(
+		R"DESCR_STR(
+### Description
+fw_pos_control is the fixed-wing position controller.
+
+)DESCR_STR");
+
+	PRINT_MODULE_USAGE_NAME("fw_pos_control", "controller");
+	PRINT_MODULE_USAGE_COMMAND("start");
+	PRINT_MODULE_USAGE_ARG("vtol", "VTOL mode", true);
+	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
+
+	return 0;
+}
+
+void FwLateralLongitudinalControl::update_control_state() {
+	updateAltitudeAndHeightRate();
+	updateAirspeed();
+	updateAttitude();
+	updateWind();
+}
+
+void FwLateralLongitudinalControl::updateWind() {
+	if (_wind_sub.updated()) {
+		wind_s wind{};
+		_wind_sub.update(&wind);
+
+		// assumes wind is valid if finite
+		_wind_valid = PX4_ISFINITE(wind.windspeed_north)
+			      && PX4_ISFINITE(wind.windspeed_east);
+
+		_time_wind_last_received = hrt_absolute_time();
+
+		_lateral_control_state.wind_speed(0) = wind.windspeed_north;
+		_lateral_control_state.wind_speed(1) = wind.windspeed_east;
+
+	} else {
+		// invalidate wind estimate usage (and correspondingly NPFG, if enabled) after subscription timeout
+		_wind_valid = _wind_valid && (hrt_absolute_time() - _time_wind_last_received) < WIND_EST_TIMEOUT;
+	}
+
+	if (!_wind_valid) {
+		_lateral_control_state.wind_speed.setZero();
+	}
+}
+
+void FwLateralLongitudinalControl::updateAltitudeAndHeightRate() {
+	float ref_alt{0.f};
+	if (_local_pos.z_global && PX4_ISFINITE(_local_pos.ref_alt)) {
+		ref_alt = _local_pos.ref_alt;
+	}
+
+	_long_control_state.altitude_msl = -_local_pos.z + ref_alt; // Altitude AMSL in meters
+	_long_control_state.height_rate = -_local_pos.vz;
+
+}
+
+void FwLateralLongitudinalControl::updateAttitude() {
+	vehicle_attitude_s att;
+
+	if (_vehicle_attitude_sub.update(&att)) {
+		vehicle_angular_velocity_s angular_velocity{};
+		_vehicle_angular_velocity_sub.copy(&angular_velocity);
+		const Vector3f rates{angular_velocity.xyz};
+
+		Dcmf R{Quatf(att.q)};
+
+		// if the vehicle is a tailsitter we have to rotate the attitude by the pitch offset
+		// between multirotor and fixed wing flight
+		if (_vehicle_status_sub.get().is_vtol_tailsitter) {
+			const Dcmf R_offset{Eulerf{0.f, M_PI_2_F, 0.f}};
+			R = R * R_offset;
+
+
+		}
+
+		const Eulerf euler_angles(R);
+		_long_control_state.pitch_rad = euler_angles.theta();
+
+//		Vector3f body_acceleration = R.transpose() * Vector3f{_local_pos.ax, _local_pos.ay, _local_pos.az};
+//		_body_acceleration_x = body_acceleration(0);
+//
+//		Vector3f body_velocity = R.transpose() * Vector3f{_local_pos.vx, _local_pos.vy, _local_pos.vz};
+//		_body_velocity_x = body_velocity(0);
+
+		// load factor due to banking
+		const float load_factor_from_bank_angle = 1.0f / max(cosf(euler_angles.phi()), FLT_EPSILON);
+		_tecs.set_load_factor(load_factor_from_bank_angle);
+	}
+}
+
+void FwLateralLongitudinalControl::updateAirspeed() {
+	bool airspeed_valid = _airspeed_valid;
+	airspeed_validated_s airspeed_validated;
+
+	if (_param_fw_use_airspd.get() && _airspeed_validated_sub.update(&airspeed_validated)) {
+
+
+		if (PX4_ISFINITE(airspeed_validated.calibrated_airspeed_m_s)
+		    && PX4_ISFINITE(airspeed_validated.true_airspeed_m_s)) {
+
+			airspeed_valid = true;
+
+			_time_airspeed_last_valid = airspeed_validated.timestamp;
+			_long_control_state.airspeed_eas = airspeed_validated.calibrated_airspeed_m_s;
+
+			_long_control_state.eas2tas = constrain(airspeed_validated.true_airspeed_m_s / airspeed_validated.calibrated_airspeed_m_s, 0.9f, 2.0f);
+
+		} else {
+			airspeed_valid = false;
+		}
+
+	} else {
+		// no airspeed updates for one second
+		if (airspeed_valid && (hrt_elapsed_time(&_time_airspeed_last_valid) > 1_s)) {
+			airspeed_valid = false;
+		}
+	}
+
+	// update TECS if validity changed
+	if (airspeed_valid != _airspeed_valid) {
+		_tecs.enable_airspeed(airspeed_valid);
+		_airspeed_valid = airspeed_valid;
+	}
+}
+
+float FwLateralLongitudinalControl::getLoadFactor() {
+	return 0;
+}
+void FwLateralLongitudinalControl::updateTECSAltitudeTimeConstant(const bool is_low_height, const float dt)
+{
+	// Target time constant for the TECS altitude tracker
+	float alt_tracking_tc = _param_fw_t_h_error_tc.get();
+
+	if (is_low_height) {
+		// If low-height conditions satisfied, compute target time constant for altitude tracking
+		alt_tracking_tc *= _param_fw_thrtc_sc.get();
+	}
+
+	_tecs_alt_time_const_slew_rate.update(alt_tracking_tc, dt);
+}
+
+float FwLateralLongitudinalControl::mapLateralAccelerationToRollAngle(float lateral_acceleration_sp) {
+	return  atanf(lateral_acceleration_sp * 1.0f / CONSTANTS_ONE_G);
+}
+
+extern "C" __EXPORT int fw_lat_lon_control_main(int argc, char *argv[])
+{
+	return FwLateralLongitudinalControl::main(argc, argv);
+}

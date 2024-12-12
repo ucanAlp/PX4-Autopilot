@@ -65,15 +65,13 @@
 
 #include <uORB/topics/vehicle_local_position.h>
 
+#include "DirectionalGuidance.hpp"
+
 /*
  * NPFG
  * Lateral-directional nonlinear path following guidance logic with excess wind handling
  */
 
-struct PathControllerOutput {
-	float course_setpoint{NAN};
-	float lateral_acceleration_feedforward{NAN};
-};
 
 class NPFG
 {
@@ -627,5 +625,6 @@ private:
 	void updateRollSetpoint();
 
 }; // class NPFG
+
 
 #endif // NPFG_H_
