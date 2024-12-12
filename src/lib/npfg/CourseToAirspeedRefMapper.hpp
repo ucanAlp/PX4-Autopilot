@@ -53,7 +53,7 @@ public:
 
 
 	float mapBearingSetpointToHeadingSetpoint(const float bearing_setpoint,
-			const matrix::Vector2f wind_vel) const;
+			const matrix::Vector2f wind_vel, float airspeed) const;
 
 private:
 	/*

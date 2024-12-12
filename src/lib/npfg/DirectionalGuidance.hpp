@@ -115,7 +115,7 @@ private:
 	float _signed_track_error;
 	float _feas_on_track;
 	float _adapted_period;
-	float _time_const;
+	float _time_const{7.0f};
 	float _track_error_bound;
 	float _track_proximity;
 	matrix::Vector2f _bearing_vec;

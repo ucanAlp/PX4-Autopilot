@@ -106,7 +106,10 @@ void FwLateralLongitudinalControl::Run()
 		}
 
 		_air_density = PX4_ISFINITE(_vehicle_air_data_sub.get().rho) ? _vehicle_air_data_sub.get().rho : _air_density;
+		_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_UNKNOWN;
 
+		_vehicle_status_sub.update();
+		_control_mode_sub.update();
 		update_control_state();
 
 		float pitch_sp{NAN};
@@ -147,7 +150,7 @@ void FwLateralLongitudinalControl::Run()
 
 			if (PX4_ISFINITE(sp.course_setpoint)) {
 				heading_setpoint = _course_to_airspeed.mapBearingSetpointToHeadingSetpoint(
-							   sp.course_setpoint, _lateral_control_state.wind_speed);
+							   sp.course_setpoint, _lateral_control_state.wind_speed, _long_control_state.airspeed_eas * _long_control_state.eas2tas);
 			}
 
 			if (PX4_ISFINITE(sp.heading_setpoint)) {
@@ -155,9 +158,10 @@ void FwLateralLongitudinalControl::Run()
 			}
 
 			if (PX4_ISFINITE(heading_setpoint)) {
-				Vector2f airspeed_ref = _lateral_control_state.ground_speed - _lateral_control_state.wind_speed;
-				const float heading = atan2(airspeed_ref(1), airspeed_ref(0));
-				lateral_accel_sp = _airspeed_ref_control.controlHeading(heading_setpoint, heading, airspeed_ref.norm());
+				const Vector2f  airspeed_vector = _lateral_control_state.ground_speed - _lateral_control_state.wind_speed;
+				const float heading = atan2f(airspeed_vector(1), airspeed_vector(0));
+				lateral_accel_sp = _airspeed_ref_control.controlHeading(heading_setpoint, heading,
+						   _long_control_state.airspeed_eas * _long_control_state.eas2tas);
 			}
 
 			if (PX4_ISFINITE(sp.lateral_acceleration_setpoint)) {
@@ -333,7 +337,7 @@ int FwLateralLongitudinalControl::task_spawn(int argc, char *argv[])
 	bool is_vtol = false;
 
 	if (argc > 1) {
-		if (strcmp(argv[1], "is_vtol") == 0) {
+		if (strcmp(argv[1], "vtol") == 0) {
 			is_vtol = true;
 		}
 	}
@@ -401,6 +405,8 @@ void FwLateralLongitudinalControl::update_control_state() {
 	updateAirspeed();
 	updateAttitude();
 	updateWind();
+
+	_lateral_control_state.ground_speed = Vector2f(_local_pos.vx, _local_pos.vy);
 }
 
 void FwLateralLongitudinalControl::updateWind() {
@@ -453,18 +459,11 @@ void FwLateralLongitudinalControl::updateAttitude() {
 		if (_vehicle_status_sub.get().is_vtol_tailsitter) {
 			const Dcmf R_offset{Eulerf{0.f, M_PI_2_F, 0.f}};
 			R = R * R_offset;
-
-
 		}
 
 		const Eulerf euler_angles(R);
 		_long_control_state.pitch_rad = euler_angles.theta();
-
-//		Vector3f body_acceleration = R.transpose() * Vector3f{_local_pos.ax, _local_pos.ay, _local_pos.az};
-//		_body_acceleration_x = body_acceleration(0);
-//
-//		Vector3f body_velocity = R.transpose() * Vector3f{_local_pos.vx, _local_pos.vy, _local_pos.vz};
-//		_body_velocity_x = body_velocity(0);
+		_yaw = euler_angles.psi();
 
 		// load factor due to banking
 		const float load_factor_from_bank_angle = 1.0f / max(cosf(euler_angles.phi()), FLT_EPSILON);

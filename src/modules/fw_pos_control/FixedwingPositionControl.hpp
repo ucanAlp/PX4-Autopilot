@@ -57,7 +57,6 @@
 #include <lib/geo/geo.h>
 #include <lib/atmosphere/atmosphere.h>
 #include <lib/npfg/DirectionalGuidance.hpp>
-#include <lib/tecs/TECS.hpp>
 #include <lib/mathlib/mathlib.h>
 #include <lib/perf/perf_counter.h>
 #include <lib/slew_rate/SlewRate.hpp>
@@ -217,21 +216,15 @@ private:
 	uORB::Subscription _vehicle_command_sub{ORB_ID(vehicle_command)};
 	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::Subscription _vehicle_status_sub{ORB_ID(vehicle_status)};
-	uORB::Subscription _fw_lateral_ctrl_sub{ORB_ID(fw_lateral_control_setpoint)};
-	uORB::Subscription _fw_longitudinal_ctrl_sub{ORB_ID(fw_longitudinal_control_setpoint)};
 
-	uORB::Publication<vehicle_attitude_setpoint_s> _attitude_sp_pub;
 	uORB::Publication<vehicle_local_position_setpoint_s> _local_pos_sp_pub{ORB_ID(vehicle_local_position_setpoint)};
-	uORB::Publication<npfg_status_s> _npfg_status_pub{ORB_ID(npfg_status)};
 	uORB::Publication<position_controller_status_s>	_pos_ctrl_status_pub{ORB_ID(position_controller_status)};
 	uORB::Publication<position_controller_landing_status_s>	_pos_ctrl_landing_status_pub{ORB_ID(position_controller_landing_status)};
-	uORB::Publication<tecs_status_s> _tecs_status_pub{ORB_ID(tecs_status)};
 	uORB::Publication<launch_detection_status_s> _launch_detection_status_pub{ORB_ID(launch_detection_status)};
 	uORB::PublicationMulti<orbit_status_s> _orbit_status_pub{ORB_ID(orbit_status)};
 	uORB::Publication<landing_gear_s> _landing_gear_pub {ORB_ID(landing_gear)};
 	uORB::Publication<normalized_unsigned_setpoint_s> _flaps_setpoint_pub{ORB_ID(flaps_setpoint)};
 	uORB::Publication<normalized_unsigned_setpoint_s> _spoilers_setpoint_pub{ORB_ID(spoilers_setpoint)};
-	uORB::PublicationData<flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_sp_pub{ORB_ID(fw_lateral_control_setpoint)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_status_pub{ORB_ID(fw_lateral_control_status)};
 	uORB::PublicationData<fw_longitudinal_control_setpoint_s> _longitudinal_ctrl_sp_pub{ORB_ID(fw_longitudinal_control_setpoint)};
@@ -283,8 +276,6 @@ private:
 	double _current_longitude{0};
 	float _current_altitude{0.f};
 
-	float _roll{0.f};
-	float _pitch{0.0f};
 	float _yaw{0.0f};
 	float _yawrate{0.0f};
 
@@ -404,21 +395,12 @@ private:
 
 	hrt_abstime _time_wind_last_received{0}; // [us]
 
-	// TECS
-
-
 	struct lateral_control_limits_s {
 		float roll_max{0.f};
 	} _lateral_limits;
 
-	// total energy control system - airspeed / altitude control
-	TECS _tecs;
-
-	bool _tecs_is_running{false};
-
 
 	// VTOL / TRANSITION
-	bool _is_vtol_tailsitter{false};
 	matrix::Vector2d _transition_waypoint{(double)NAN, (double)NAN};
 	float _backtrans_heading{NAN};	// used to lock the initial heading for backtransition with no position control
 
@@ -434,9 +416,6 @@ private:
 
 	// nonlinear path following guidance - lateral-directional position control
 	DirectionalGuidance _directional_guidance;
-	bool _need_report_npfg_uncertain_condition{false}; ///< boolean if reporting of uncertain npfg output condition is needed
-	hrt_abstime _time_since_first_reduced_roll{0U}; ///< absolute time since start when entering reduced roll angle for the first time
-	hrt_abstime _time_since_last_npfg_call{0U}; 	///< absolute time since start when the npfg reduced roll angle calculations was last performed
 
 	PerformanceModel _performance_model;
 

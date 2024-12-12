@@ -32,11 +32,9 @@
 ############################################################################
 
 px4_add_library(npfg
-	npfg.cpp
 	DirectionalGuidance.cpp
 	CourseToAirspeedRefMapper.cpp
 	AirspeedReferenceController.cpp
-	npfg.hpp
 	DirectionalGuidance.hpp
 	CourseToAirspeedRefMapper.hpp
 	AirspeedReferenceController.hpp

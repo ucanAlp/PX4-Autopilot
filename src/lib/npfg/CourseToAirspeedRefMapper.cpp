@@ -4,8 +4,9 @@
 #include "CourseToAirspeedRefMapper.hpp"
 using matrix::Vector2f;
 
-float CourseToAirspeedRefMapper::mapBearingSetpointToHeadingSetpoint(const float bearing_setpoint,
-		const Vector2f wind_vel) const
+float
+CourseToAirspeedRefMapper::mapBearingSetpointToHeadingSetpoint(const float bearing_setpoint, const Vector2f wind_vel,
+		float airspeed) const
 {
 
 	Vector2f bearing_vector = Vector2f{cosf(bearing_setpoint), sinf(bearing_setpoint)};
@@ -13,7 +14,7 @@ float CourseToAirspeedRefMapper::mapBearingSetpointToHeadingSetpoint(const float
 	const float wind_dot_bearing = wind_vel.dot(bearing_vector);
 
 	const Vector2f air_vel_ref = refAirVelocity(wind_vel, bearing_vector, wind_cross_bearing,
-				     wind_dot_bearing, wind_vel.norm(), 0);
+				     wind_dot_bearing, wind_vel.norm(), airspeed);
 
 	return atan2f(air_vel_ref(1), air_vel_ref(0));
 }

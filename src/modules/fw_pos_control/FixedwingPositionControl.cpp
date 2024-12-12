@@ -53,7 +53,6 @@ const fw_longitudinal_control_setpoint_s empty_longitudinal_control_setpoint = {
 FixedwingPositionControl::FixedwingPositionControl(bool vtol) :
 	ModuleParams(nullptr),
 	WorkItem(MODULE_NAME, px4::wq_configurations::nav_and_controllers),
-	_attitude_sp_pub(vtol ? ORB_ID(fw_virtual_attitude_setpoint) : ORB_ID(vehicle_attitude_setpoint)),
 	_loop_perf(perf_alloc(PC_ELAPSED, MODULE_NAME": cycle")),
 	_launchDetector(this),
 	_runway_takeoff(this)
@@ -285,7 +284,7 @@ FixedwingPositionControl::vehicle_attitude_poll()
 		}
 
 		const Eulerf euler_angles(R);
-		_pitch = euler_angles(1);
+		euler_angles(1);
 		_yaw = euler_angles(2);
 
 		Vector3f body_acceleration = R.transpose() * Vector3f{_local_pos.ax, _local_pos.ay, _local_pos.az};
@@ -2446,8 +2445,6 @@ FixedwingPositionControl::Run()
 		_flaps_setpoint = 0.f;
 		_spoilers_setpoint = 0.f;
 
-		// reset flight phase estimate
-		_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_UNKNOWN;
 
 		// by default we don't want yaw to be contoller directly with rudder
 		_att_sp.fw_control_yaw_wheel = false;
