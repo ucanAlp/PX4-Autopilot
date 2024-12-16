@@ -77,9 +77,6 @@ FixedwingPositionControl::FixedwingPositionControl(bool vtol) :
 	/* fetch initial parameter values */
 	parameters_update();
 
-	_roll_slew_rate.setSlewRate(radians(_param_fw_pn_r_slew_max.get()));
-	_roll_slew_rate.setForcedValue(0.f);
-
 
 }
 
@@ -105,8 +102,6 @@ FixedwingPositionControl::parameters_update()
 	updateParams();
 
 	_performance_model.updateParameters();
-
-	_roll_slew_rate.setSlewRate(radians(_param_fw_pn_r_slew_max.get()));
 
 	// NPFG parameters
 	_directional_guidance.setPeriod(_param_npfg_period.get());
@@ -476,41 +471,6 @@ FixedwingPositionControl::updateLandingAbortStatus(const uint8_t new_abort_statu
 	}
 }
 
-void
-FixedwingPositionControl::get_waypoint_heading_distance(float heading, position_setpoint_s &waypoint_prev,
-		position_setpoint_s &waypoint_next, bool flag_init)
-{
-	position_setpoint_s temp_prev = waypoint_prev;
-	position_setpoint_s temp_next = waypoint_next;
-
-	if (flag_init) {
-		// previous waypoint: HDG_HOLD_SET_BACK_DIST meters behind us
-		waypoint_from_heading_and_distance(_current_latitude, _current_longitude, heading + radians(180.0f),
-						   HDG_HOLD_SET_BACK_DIST, &temp_prev.lat, &temp_prev.lon);
-
-		// next waypoint: HDG_HOLD_DIST_NEXT meters in front of us
-		waypoint_from_heading_and_distance(_current_latitude, _current_longitude, heading,
-						   HDG_HOLD_DIST_NEXT, &temp_next.lat, &temp_next.lon);
-
-	} else {
-		// use the existing flight path from prev to next
-
-		// previous waypoint: shifted HDG_HOLD_REACHED_DIST + HDG_HOLD_SET_BACK_DIST
-		create_waypoint_from_line_and_dist(waypoint_next.lat, waypoint_next.lon, waypoint_prev.lat, waypoint_prev.lon,
-						   HDG_HOLD_REACHED_DIST + HDG_HOLD_SET_BACK_DIST, &temp_prev.lat, &temp_prev.lon);
-
-		// next waypoint: shifted -(HDG_HOLD_DIST_NEXT + HDG_HOLD_REACHED_DIST)
-		create_waypoint_from_line_and_dist(waypoint_next.lat, waypoint_next.lon, waypoint_prev.lat, waypoint_prev.lon,
-						   -(HDG_HOLD_REACHED_DIST + HDG_HOLD_DIST_NEXT), &temp_next.lat, &temp_next.lon);
-	}
-
-	waypoint_prev = temp_prev;
-	waypoint_prev.alt = _current_altitude;
-
-	waypoint_next = temp_next;
-	waypoint_next.alt = _current_altitude;
-}
-
 float
 FixedwingPositionControl::getManualHeightRateSetpoint()
 {
@@ -837,7 +797,7 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 	// Special case: if z or vz estimate is invalid we cannot control height anymore. To prevent a
 	// "climb-away" we set the thrust to MIN in that case.
 	if (_landed || !_local_pos.z_valid || !_local_pos.v_z_valid) {
-		throttle_max = _param_fw_p_lim_min.get();
+		throttle_max = _param_fw_thr_min.get();
 	}
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
@@ -861,11 +821,11 @@ FixedwingPositionControl::control_auto_descend(const float control_interval)
 {
 	// Hard-code descend rate to 0.5m/s. This is a compromise to give the system to recover,
 	// but not letting it drift too far away.
-	const float descend_rate = -0.5f;
+	const float descend_rate = 0.5f;
 
 	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
 		.timestamp = hrt_absolute_time(),
-		.height_rate_setpoint = descend_rate,
+		.height_rate_setpoint = -descend_rate,
 		.altitude_setpoint = _current_altitude,
 		.equivalent_airspeed_setpoint = _performance_model.getCalibratedTrimAirspeed(),
 	};
@@ -1013,7 +973,6 @@ FixedwingPositionControl::control_auto_position(const float control_interval, co
 	Vector2f curr_pos_local{_local_pos.x, _local_pos.y};
 	Vector2f curr_wp_local = _global_local_proj_ref.project(pos_sp_curr.lat, pos_sp_curr.lon);
 
-
 	PathControllerOutput sp{};
 
 	if (_position_setpoint_previous_valid && pos_sp_prev.type != position_setpoint_s::SETPOINT_TYPE_TAKEOFF) {
@@ -1052,13 +1011,13 @@ FixedwingPositionControl::control_auto_velocity(const float control_interval, co
 
 	//Offboard velocity control
 	Vector2f target_velocity{pos_sp_curr.vx, pos_sp_curr.vy};
-	_target_bearing = wrap_pi(atan2f(target_velocity(1), target_velocity(0)));
+	const float target_bearing = wrap_pi(atan2f(target_velocity(1), target_velocity(0)));
 
 	float target_airspeed = adapt_airspeed_setpoint(control_interval, pos_sp_curr.cruising_speed,
 				_performance_model.getMinimumCalibratedAirspeed(getLoadFactor()), ground_speed);
 
 	const Vector2f curr_pos_local{_local_pos.x, _local_pos.y};
-	const PathControllerOutput sp = navigateBearing(curr_pos_local, _target_bearing, ground_speed, _wind_vel);
+	const PathControllerOutput sp = navigateBearing(curr_pos_local, target_bearing, ground_speed, _wind_vel);
 
 	fw_lateral_control_setpoint_s fw_lateral_ctrl_sp{empty_lateral_control_setpoint};
 	fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();

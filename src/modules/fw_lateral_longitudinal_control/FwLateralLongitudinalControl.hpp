@@ -61,30 +61,15 @@
 #include <uORB/SubscriptionCallback.hpp>
 #include <uORB/topics/airspeed_validated.h>
 #include <uORB/topics/flight_phase_estimation.h>
-#include <uORB/topics/landing_gear.h>
-#include <uORB/topics/launch_detection_status.h>
-#include <uORB/topics/manual_control_setpoint.h>
-#include <uORB/topics/normalized_unsigned_setpoint.h>
-#include <uORB/topics/npfg_status.h>
 #include <uORB/topics/parameter_update.h>
-#include <uORB/topics/position_controller_landing_status.h>
-#include <uORB/topics/position_controller_status.h>
-#include <uORB/topics/position_setpoint_triplet.h>
 #include <uORB/topics/tecs_status.h>
-#include <uORB/topics/trajectory_setpoint.h>
 #include <uORB/topics/vehicle_air_data.h>
-#include <uORB/topics/vehicle_angular_velocity.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_attitude_setpoint.h>
-#include <uORB/topics/vehicle_command.h>
 #include <uORB/topics/vehicle_control_mode.h>
-#include <uORB/topics/vehicle_global_position.h>
-#include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/vehicle_local_position.h>
-#include <uORB/topics/vehicle_local_position_setpoint.h>
 #include <uORB/topics/vehicle_status.h>
 #include <uORB/topics/wind.h>
-#include <uORB/topics/orbit_status.h>
 #include <uORB/uORB.h>
 #include <uORB/topics/fw_lateral_control_setpoint.h>
 #include <uORB/topics/fw_longitudinal_control_setpoint.h>
@@ -122,15 +107,8 @@ private:
 	uORB::Subscription _airspeed_validated_sub{ORB_ID(airspeed_validated)};
 	uORB::Subscription _wind_sub{ORB_ID(wind)};
 	uORB::SubscriptionData<vehicle_control_mode_s> _control_mode_sub{ORB_ID(vehicle_control_mode)};
-	uORB::Subscription _global_pos_sub{ORB_ID(vehicle_global_position)};
-	uORB::Subscription _manual_control_setpoint_sub{ORB_ID(manual_control_setpoint)};
-	uORB::Subscription _pos_sp_triplet_sub{ORB_ID(position_setpoint_triplet)};
-	uORB::Subscription _trajectory_setpoint_sub{ORB_ID(trajectory_setpoint)};
 	uORB::SubscriptionData<vehicle_air_data_s> _vehicle_air_data_sub{ORB_ID(vehicle_air_data)};
-	uORB::Subscription _vehicle_angular_velocity_sub{ORB_ID(vehicle_angular_velocity)};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
-	uORB::Subscription _vehicle_command_sub{ORB_ID(vehicle_command)};
-	uORB::Subscription _vehicle_land_detected_sub{ORB_ID(vehicle_land_detected)};
 	uORB::SubscriptionData<vehicle_status_s> _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _fw_lateral_ctrl_sub{ORB_ID(fw_lateral_control_setpoint)};
 	uORB::Subscription _fw_longitudinal_ctrl_sub{ORB_ID(fw_longitudinal_control_setpoint)};
@@ -140,21 +118,11 @@ private:
 	longitudinal_control_limits_s _long_control_limits{};
 
 	uORB::Publication <vehicle_attitude_setpoint_s> _attitude_sp_pub;
-	uORB::Publication <vehicle_local_position_setpoint_s> _local_pos_sp_pub{ORB_ID(vehicle_local_position_setpoint)};
-	uORB::Publication <npfg_status_s> _npfg_status_pub{ORB_ID(npfg_status)};
-	uORB::Publication <position_controller_status_s> _pos_ctrl_status_pub{ORB_ID(position_controller_status)};
-	uORB::Publication <position_controller_landing_status_s> _pos_ctrl_landing_status_pub{
-		ORB_ID(position_controller_landing_status)};
 	uORB::Publication <tecs_status_s> _tecs_status_pub{ORB_ID(tecs_status)};
-	uORB::Publication <launch_detection_status_s> _launch_detection_status_pub{ORB_ID(launch_detection_status)};
-	uORB::PublicationMulti <orbit_status_s> _orbit_status_pub{ORB_ID(orbit_status)};
-	uORB::Publication <landing_gear_s> _landing_gear_pub{ORB_ID(landing_gear)};
-	uORB::Publication <normalized_unsigned_setpoint_s> _flaps_setpoint_pub{ORB_ID(flaps_setpoint)};
-	uORB::Publication <normalized_unsigned_setpoint_s> _spoilers_setpoint_pub{ORB_ID(spoilers_setpoint)};
 	uORB::PublicationData <flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 	uORB::PublicationData <fw_lateral_control_setpoint_s> _lateral_ctrl_status_pub{ORB_ID(fw_lateral_control_status)};
 	uORB::PublicationData <fw_longitudinal_control_setpoint_s> _longitudinal_ctrl_status_pub{
-		ORB_ID(fw_longitudinal_control_setpoint)};
+		ORB_ID(fw_longitudinal_control_status)};
 
 	DEFINE_PARAMETERS(
 		(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off,
@@ -227,8 +195,6 @@ private:
 
 	void tecs_status_publish(float alt_sp, float equivalent_airspeed_sp, float true_airspeed_derivative_raw,
 				 float throttle_trim);
-
-	float getLoadFactor();
 
 	void updateAirspeed();
 

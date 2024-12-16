@@ -5,3 +5,5 @@ float32 altitude_setpoint
 float32 equivalent_airspeed_setpoint
 float32 pitch_sp
 float32 thrust_sp
+
+# TOPICS fw_longitudinal_control_setpoint fw_longitudinal_control_status

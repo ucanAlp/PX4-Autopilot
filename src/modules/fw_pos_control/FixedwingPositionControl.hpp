@@ -485,17 +485,6 @@ private:
 	bool checkLandingAbortBitMask(const uint8_t automatic_abort_criteria_bitmask, uint8_t landing_abort_criterion);
 
 	/**
-	 * @brief Get a new waypoint based on heading and distance from current position
-	 *
-	 * @param heading the heading to fly to
-	 * @param distance the distance of the generated waypoint
-	 * @param waypoint_prev the waypoint at the current position
-	 * @param waypoint_next the waypoint in the heading direction
-	 */
-	void get_waypoint_heading_distance(float heading, position_setpoint_s &waypoint_prev,
-					   position_setpoint_s &waypoint_next, bool flag_init);
-
-	/**
 	 * @brief Return the terrain estimate during takeoff or takeoff_alt if terrain estimate is not available
 	 *
 	 * @param takeoff_alt Altitude AMSL at launch or when runway takeoff is detected [m]
@@ -741,7 +730,6 @@ private:
 	float modifyThrustSetpoint(float thrust);
 
 	SlewRate<float> _airspeed_slew_rate_controller;
-	SlewRate<float> _roll_slew_rate;
 
 	/**
 	 * @brief Constrains the roll angle setpoint near ground to avoid wingtip strike.

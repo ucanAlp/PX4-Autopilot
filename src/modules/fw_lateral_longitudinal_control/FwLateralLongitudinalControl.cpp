@@ -136,6 +136,15 @@ void FwLateralLongitudinalControl::Run()
 			pitch_sp = _tecs.get_pitch_setpoint();
 			thrust_sp = _tecs.get_throttle_setpoint();
 			update = true;
+
+			fw_longitudinal_control_setpoint_s longitudinal_control_status {
+				.timestamp = hrt_absolute_time(),
+				.height_rate_setpoint = 0.f, // TODO get from TECS
+				.altitude_setpoint = longitudinal_sp.altitude_setpoint,
+				.equivalent_airspeed_setpoint = 0.f // TODO: get from TECS
+			};
+
+			_longitudinal_ctrl_status_pub.publish(longitudinal_control_status);
 		}
 
 
@@ -448,9 +457,6 @@ void FwLateralLongitudinalControl::updateAttitude() {
 	vehicle_attitude_s att;
 
 	if (_vehicle_attitude_sub.update(&att)) {
-		vehicle_angular_velocity_s angular_velocity{};
-		_vehicle_angular_velocity_sub.copy(&angular_velocity);
-		const Vector3f rates{angular_velocity.xyz};
 
 		Dcmf R{Quatf(att.q)};
 
@@ -506,9 +512,6 @@ void FwLateralLongitudinalControl::updateAirspeed() {
 	}
 }
 
-float FwLateralLongitudinalControl::getLoadFactor() {
-	return 0;
-}
 void FwLateralLongitudinalControl::updateTECSAltitudeTimeConstant(const bool is_low_height, const float dt)
 {
 	// Target time constant for the TECS altitude tracker
