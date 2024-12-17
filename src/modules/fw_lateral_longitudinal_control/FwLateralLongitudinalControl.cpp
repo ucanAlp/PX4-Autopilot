@@ -1,7 +1,8 @@
-//
+
 // Created by roman on 12.12.24.
 //
 #include "FwLateralLongitudinalControl.hpp"
+#include <px4_platform_common/events.h>
 
 using math::constrain;
 using math::max;
@@ -22,6 +23,17 @@ static constexpr float MAX_ALT_REF_RATE_FOR_LEVEL_FLIGHT = 0.1f;
 static constexpr hrt_abstime WIND_EST_TIMEOUT = 10_s;
 // [s] slew rate with which we change altitude time constant
 static constexpr float TECS_ALT_TIME_CONST_SLEW_RATE = 1.0f;
+
+static constexpr float HORIZONTAL_EVH_FACTOR_COURSE_VALID{3.f}; ///< Factor of velocity standard deviation above which course calculation is considered good enough
+static constexpr float HORIZONTAL_EVH_FACTOR_COURSE_INVALID{2.f}; ///< Factor of velocity standard deviation below which course calculation is considered unsafe
+static constexpr float COS_HEADING_TRACK_ANGLE_NOT_PUSHED_BACK{0.09f}; ///< Cos of Heading to track angle below which it is assumed that the vehicle is not pushed back by the wind ~cos(85°)
+static constexpr float COS_HEADING_TRACK_ANGLE_PUSHED_BACK{0.f}; ///< Cos of Heading to track angle above which it is assumed that the vehicle is pushed back by the wind
+
+// [s] Timeout that has to pass in roll-constraining failsafe before warning is triggered
+static constexpr uint64_t ROLL_WARNING_TIMEOUT = 2_s;
+
+// [-] Can-run threshold needed to trigger the roll-constraining failsafe warning
+static constexpr float ROLL_WARNING_CAN_RUN_THRESHOLD = 0.9f;
 
 const fw_lateral_control_setpoint_s empty_lateral_control_setpoint = {.timestamp = 0, .course_setpoint = NAN, .heading_setpoint = NAN, .lateral_acceleration_setpoint = NAN, .roll_sp = NAN};
 const fw_longitudinal_control_setpoint_s empty_longitudinal_control_setpoint = {.timestamp = 0, .height_rate_setpoint = NAN, .altitude_setpoint = NAN, .equivalent_airspeed_setpoint = NAN, .pitch_sp = NAN, .thrust_sp = NAN};
@@ -99,14 +111,23 @@ void FwLateralLongitudinalControl::Run()
 		const float control_interval = math::constrain((_local_pos.timestamp - _last_time_loop_ran) * 1e-6f,
 					       0.001f, 0.1f);
 		_last_time_loop_ran = _local_pos.timestamp;
+
+		updateTECSAltitudeTimeConstant(checkLowHeightConditions(), control_interval);
+		_tecs.set_altitude_error_time_constant(_tecs_alt_time_const_slew_rate.getState());
+
 		fw_longitudinal_control_setpoint_s longitudinal_sp = {empty_longitudinal_control_setpoint};
 
-		if (_long_control_limits_sub.updated()) {
-			_long_control_limits_sub.update(&_long_control_limits);
-		}
+		_long_control_limits_sub.update();
+		_lateral_control_limits_sub.update();
 
 		_air_density = PX4_ISFINITE(_vehicle_air_data_sub.get().rho) ? _vehicle_air_data_sub.get().rho : _air_density;
 		_flight_phase_estimation_pub.get().flight_phase = flight_phase_estimation_s::FLIGHT_PHASE_UNKNOWN;
+
+		if (_vehicle_landed_sub.updated()) {
+			vehicle_land_detected_s landed{};
+			_vehicle_landed_sub.copy(&landed);
+			_landed = landed.landed;
+		}
 
 		_vehicle_status_sub.update();
 		_control_mode_sub.update();
@@ -115,7 +136,7 @@ void FwLateralLongitudinalControl::Run()
 		float pitch_sp{NAN};
 		float thrust_sp{NAN};
 
-		bool update = false;
+		bool publish = false;
 
 		_fw_longitudinal_ctrl_sub.copy(&longitudinal_sp);
 
@@ -123,19 +144,19 @@ void FwLateralLongitudinalControl::Run()
 			tecs_update_pitch_throttle(control_interval, longitudinal_sp.altitude_setpoint,
 						   PX4_ISFINITE(longitudinal_sp.equivalent_airspeed_setpoint) ? longitudinal_sp.equivalent_airspeed_setpoint :
 						   _performance_model.getCalibratedTrimAirspeed(),
-						   _long_control_limits.pitch_min,
-						   _long_control_limits.pitch_max,
-						   _long_control_limits.throttle_min,
-						   _long_control_limits.throttle_max,
-						   _long_control_limits.sink_rate_max,
-						   _long_control_limits.climb_rate_max,
+						   _long_control_limits_sub.get().pitch_min,
+						   _long_control_limits_sub.get().pitch_max,
+						   _long_control_limits_sub.get().throttle_min,
+						   _long_control_limits_sub.get().throttle_max,
+						   _long_control_limits_sub.get().sink_rate_max,
+						   _long_control_limits_sub.get().climb_rate_max,
 						   false, // TODO, replace
 						   false, // TODO, replace
 						   longitudinal_sp.height_rate_setpoint
 						  );
 			pitch_sp = _tecs.get_pitch_setpoint();
 			thrust_sp = _tecs.get_throttle_setpoint();
-			update = true;
+			publish = true;
 
 			fw_longitudinal_control_setpoint_s longitudinal_control_status {
 				.timestamp = hrt_absolute_time(),
@@ -179,6 +200,9 @@ void FwLateralLongitudinalControl::Run()
 			}
 
 			if (PX4_ISFINITE(lateral_accel_sp)) {
+				lateral_accel_sp = getCorrectedLateralAccelSetpoint(lateral_accel_sp);
+				lateral_accel_sp = math::constrain(lateral_accel_sp, -_lateral_control_limits_sub.get().lateral_accel_max,
+								   _lateral_control_limits_sub.get().lateral_accel_max);
 				roll_sp = mapLateralAccelerationToRollAngle(lateral_accel_sp);
 			}
 
@@ -191,11 +215,11 @@ void FwLateralLongitudinalControl::Run()
 			};
 
 			_lateral_ctrl_status_pub.publish(status);
-			update = true;
+			publish = true;
 		}
 
 
-		if (update) {
+		if (publish) {
 			float roll_body = PX4_ISFINITE(roll_sp) ? roll_sp : 0.0f;
 			float pitch_body = PX4_ISFINITE(pitch_sp) ? pitch_sp : 0.0f;
 			float yaw_body = _yaw;
@@ -511,6 +535,12 @@ void FwLateralLongitudinalControl::updateAirspeed() {
 		_airspeed_valid = airspeed_valid;
 	}
 }
+bool FwLateralLongitudinalControl::checkLowHeightConditions()
+{
+	// Are conditions for low-height
+	return _param_fw_t_thr_low_hgt.get() >= 0.f && _local_pos.dist_bottom_valid
+	       && _local_pos.dist_bottom < _param_fw_t_thr_low_hgt.get();
+}
 
 void FwLateralLongitudinalControl::updateTECSAltitudeTimeConstant(const bool is_low_height, const float dt)
 {
@@ -525,6 +555,70 @@ void FwLateralLongitudinalControl::updateTECSAltitudeTimeConstant(const bool is_
 	_tecs_alt_time_const_slew_rate.update(alt_tracking_tc, dt);
 }
 
+float FwLateralLongitudinalControl::getGuidanceQualityFactor(const vehicle_local_position_s &local_pos, const bool is_wind_valid) const
+{
+	if (is_wind_valid) {
+		// If we have a valid wind estimate, npfg is able to handle all degenerated cases
+		return 1.f;
+	}
+
+	// NPFG can run without wind information as long as the system is not flying backwards and has a minimal ground speed
+	// Check the minimal ground speed. if it is greater than twice the standard deviation, we assume that we can infer a valid track angle
+	const Vector2f ground_vel(local_pos.vx, local_pos.vy);
+	const float ground_speed(ground_vel.norm());
+	const float low_ground_speed_factor(math::constrain((ground_speed - HORIZONTAL_EVH_FACTOR_COURSE_INVALID *
+									    local_pos.evh) / ((HORIZONTAL_EVH_FACTOR_COURSE_VALID - HORIZONTAL_EVH_FACTOR_COURSE_INVALID)*local_pos.evh),
+							    0.f, 1.f));
+
+	// Check that the angle between heading and track is not off too much. if it is greater than 90° we will be pushed back from the wind and the npfg will propably give a roll command in the wrong direction.
+	const Vector2f heading_vector(matrix::Dcm2f(local_pos.heading)*Vector2f({1.f, 0.f}));
+	const Vector2f ground_vel_norm(ground_vel.normalized());
+	const float flying_forward_factor(math::constrain((heading_vector.dot(ground_vel_norm) -
+							   COS_HEADING_TRACK_ANGLE_PUSHED_BACK) / ((COS_HEADING_TRACK_ANGLE_NOT_PUSHED_BACK -
+												    COS_HEADING_TRACK_ANGLE_PUSHED_BACK)),
+							  0.f, 1.f));
+
+	return flying_forward_factor * low_ground_speed_factor;
+}
+float FwLateralLongitudinalControl::getCorrectedLateralAccelSetpoint(float lateral_accel_sp)
+{
+	// Scale the npfg output to zero if npfg is not certain for correct output
+	const float can_run_factor{math::constrain(getGuidanceQualityFactor(_local_pos, _wind_valid), 0.f, 1.f)};
+
+	hrt_abstime now{hrt_absolute_time()};
+
+	// Warn the user when the scale is less than 90% for at least 2 seconds (disable in transition)
+
+	// If the npfg was not running before, reset the user warning variables.
+	if ((now - _time_since_last_npfg_call) > ROLL_WARNING_TIMEOUT) {
+		_need_report_npfg_uncertain_condition = true;
+		_time_since_first_reduced_roll = 0U;
+	}
+
+	if (_vehicle_status_sub.get().in_transition_mode || can_run_factor > ROLL_WARNING_CAN_RUN_THRESHOLD || _landed) {
+		// NPFG reports a good condition or we are in transition, reset the user warning variables.
+		_need_report_npfg_uncertain_condition = true;
+		_time_since_first_reduced_roll = 0U;
+
+	} else if (_need_report_npfg_uncertain_condition) {
+		if (_time_since_first_reduced_roll == 0U) {
+			_time_since_first_reduced_roll = now;
+		}
+
+		if ((now - _time_since_first_reduced_roll) > ROLL_WARNING_TIMEOUT) {
+			_need_report_npfg_uncertain_condition = false;
+			events::send(events::ID("npfg_roll_command_uncertain"), events::Log::Warning,
+				     "Roll command reduced due to uncertain velocity/wind estimates!");
+		}
+
+	} else {
+		// Nothing to do, already reported.
+	}
+
+	_time_since_last_npfg_call = now;
+
+	return can_run_factor * (lateral_accel_sp);
+}
 float FwLateralLongitudinalControl::mapLateralAccelerationToRollAngle(float lateral_acceleration_sp) {
 	return  atanf(lateral_acceleration_sp * 1.0f / CONSTANTS_ONE_G);
 }

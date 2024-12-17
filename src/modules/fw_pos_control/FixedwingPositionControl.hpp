@@ -100,6 +100,7 @@
 #include <uORB/topics/fw_lateral_control_setpoint.h>
 #include <uORB/topics/fw_longitudinal_control_setpoint.h>
 #include <uORB/topics/longitudinal_control_limits.h>
+#include <uORB/topics/lateral_control_limits.h>
 
 #ifdef CONFIG_FIGURE_OF_EIGHT
 #include "figure_eight/FigureEight.hpp"
@@ -116,12 +117,6 @@ using matrix::Vector2f;
 
 // [m] initial distance of waypoint in front of plane in heading hold mode
 static constexpr float HDG_HOLD_DIST_NEXT = 3000.0f;
-
-// [m] distance (plane to waypoint in front) at which waypoints are reset in heading hold mode
-static constexpr float HDG_HOLD_REACHED_DIST = 1000.0f;
-
-// [m] distance by which previous waypoint is set behind the plane
-static constexpr float HDG_HOLD_SET_BACK_DIST = 100.0f;
 
 // [rad/s] max yawrate at which plane locks yaw for heading hold mode
 static constexpr float HDG_HOLD_YAWRATE_THRESH = 0.15f;
@@ -171,11 +166,6 @@ static constexpr float POST_TOUCHDOWN_CLAMP_TIME = 0.5f;
 // [m/s] maximum reference altitude rate threshhold
 static constexpr float MAX_ALT_REF_RATE_FOR_LEVEL_FLIGHT = 0.1f;
 
-// [s] Timeout that has to pass in roll-constraining failsafe before warning is triggered
-static constexpr uint64_t ROLL_WARNING_TIMEOUT = 2_s;
-
-// [-] Can-run threshold needed to trigger the roll-constraining failsafe warning
-static constexpr float ROLL_WARNING_CAN_RUN_THRESHOLD = 0.9f;
 
 
 class FixedwingPositionControl final : public ModuleBase<FixedwingPositionControl>, public ModuleParams,
@@ -227,6 +217,7 @@ private:
 	uORB::Publication<normalized_unsigned_setpoint_s> _spoilers_setpoint_pub{ORB_ID(spoilers_setpoint)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_sp_pub{ORB_ID(fw_lateral_control_setpoint)};
 	uORB::PublicationData<fw_lateral_control_setpoint_s> _lateral_ctrl_status_pub{ORB_ID(fw_lateral_control_status)};
+	uORB::PublicationData<lateral_control_limits_s> _lateral_ctrl_limits_pub{ORB_ID(lateral_control_limits)};
 	uORB::PublicationData<fw_longitudinal_control_setpoint_s> _longitudinal_ctrl_sp_pub{ORB_ID(fw_longitudinal_control_setpoint)};
 	uORB::PublicationData<longitudinal_control_limits_s> _longitudinal_ctrl_limits_pub{ORB_ID(longitudinal_control_limits)};
 
@@ -395,11 +386,6 @@ private:
 
 	hrt_abstime _time_wind_last_received{0}; // [us]
 
-	struct lateral_control_limits_s {
-		float roll_max{0.f};
-	} _lateral_limits;
-
-
 	// VTOL / TRANSITION
 	matrix::Vector2d _transition_waypoint{(double)NAN, (double)NAN};
 	float _backtrans_heading{NAN};	// used to lock the initial heading for backtransition with no position control
@@ -428,7 +414,6 @@ private:
 
 	hrt_abstime _time_in_fixed_bank_loiter{0}; // [us]
 	float _min_current_sp_distance_xy{FLT_MAX};
-	float _target_bearing{0.0f}; // [rad]
 
 #ifdef CONFIG_FIGURE_OF_EIGHT
 	/* Loitering */
@@ -454,15 +439,14 @@ private:
 
 	// Update subscriptions
 	void airspeed_poll();
-	void control_update();
+
 	void manual_control_setpoint_poll();
 	void vehicle_attitude_poll();
 	void vehicle_command_poll();
 	void vehicle_control_mode_poll();
-	void vehicle_status_poll();
+
 	void wind_poll();
 
-	void status_publish();
 	void landing_status_publish();
 
 	void publishLocalPositionSetpoint(const position_setpoint_s &current_waypoint);
@@ -485,13 +469,6 @@ private:
 	bool checkLandingAbortBitMask(const uint8_t automatic_abort_criteria_bitmask, uint8_t landing_abort_criterion);
 
 	/**
-	 * @brief Return the terrain estimate during takeoff or takeoff_alt if terrain estimate is not available
-	 *
-	 * @param takeoff_alt Altitude AMSL at launch or when runway takeoff is detected [m]
-	 */
-	float get_terrain_altitude_takeoff(float takeoff_alt);
-
-	/**
 	 * @brief Maps the manual control setpoint (pilot sticks) to height rate commands
 	 *
 	 * @return Manual height rate setpoint [m/s]
@@ -504,13 +481,6 @@ private:
 	 * Criteria include passing an airspeed threshold and not being in a landed state. VTOL airframes always pass.
 	 */
 	void updateManualTakeoffStatus();
-
-	/**
-	 * @brief Update desired altitude base on user pitch stick input
-	 *
-	 * @param dt Time step
-	 */
-	void update_desired_altitude(float dt);
 
 	/**
 	 * @brief Updates timing information for landed and in-air states.
@@ -725,21 +695,7 @@ private:
 
 	void publishOrbitStatus(const position_setpoint_s pos_sp);
 
-	float mapLateralAccelerationToRollAngle(const float lateral_acceleration, hrt_abstime now);
-	float modifyPitchSetpoint(float pitch_sp);
-	float modifyThrustSetpoint(float thrust);
-
 	SlewRate<float> _airspeed_slew_rate_controller;
-
-	/**
-	 * @brief Constrains the roll angle setpoint near ground to avoid wingtip strike.
-	 *
-	 * @param roll_setpoint Unconstrained roll angle setpoint [rad]
-	 * @param altitude Vehicle altitude (AMSL) [m]
-	 * @param terrain_altitude Terrain altitude (AMSL) [m]
-	 * @return Constrained roll angle setpoint [rad]
-	 */
-	float constrainRollNearGround(const float roll_setpoint, const float altitude, const float terrain_altitude) const;
 
 	float getMaxRollAngleNearGround(const float altitude, const float terrain_altitude) const;
 
@@ -788,21 +744,6 @@ private:
 	 */
 	void initializeAutoLanding(const hrt_abstime &now, const position_setpoint_s &pos_sp_prev,
 				   const float land_point_alt, const Vector2f &local_position, const Vector2f &local_land_point);
-
-	/*
-	 * Checks if the vehicle satisfies conditions for low-height flight
-	 *
-	 * @return bool True if conditions are satisfied, false otherwise
-	 */
-	bool checkLowHeightConditions();
-
-	/*
-	 * Updates TECS altitude time constant according to the is_low_height parameter.
-	 *
-	 * @param is_low_height Boolean flag defining whether we are in low-height flight
-	 * @param dt Update time step [s]
-	 */
-	void updateTECSAltitudeTimeConstant(const bool is_low_height, const float dt);
 
 	/*
 	 * Waypoint handling logic following closely to the ECL_L1_Pos_Controller
@@ -960,8 +901,6 @@ private:
 		// external parameters
 		(ParamBool<px4::params::FW_USE_AIRSPD>) _param_fw_use_airspd,
 
-		(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off,
-
 		(ParamFloat<px4::params::NAV_LOITER_RAD>) _param_nav_loiter_rad,
 
 		(ParamFloat<px4::params::FW_TKO_PITCH_MIN>) _takeoff_pitch_min,
@@ -989,6 +928,11 @@ private:
 		(ParamBool<px4::params::FW_LAUN_DETCN_ON>) _param_fw_laun_detcn_on
 	)
 
+	void control_idle();
+
+	void setDefaultLongControlLimits(longitudinal_control_limits_s &longitudinal_control_limits) const;
+
+	float rollAngleToLateralAccel(float roll_body) const;
 };
 
 #endif // FIXEDWINGPOSITIONCONTROL_HPP_

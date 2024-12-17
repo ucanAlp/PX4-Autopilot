@@ -74,6 +74,8 @@
 #include <uORB/topics/fw_lateral_control_setpoint.h>
 #include <uORB/topics/fw_longitudinal_control_setpoint.h>
 #include <uORB/topics/longitudinal_control_limits.h>
+#include <uORB/topics/lateral_control_limits.h>
+#include <uORB/topics/vehicle_land_detected.h>
 #include <fw_performance_model/PerformanceModel.hpp>
 #include <slew_rate/SlewRate.hpp>
 
@@ -109,13 +111,14 @@ private:
 	uORB::SubscriptionData<vehicle_control_mode_s> _control_mode_sub{ORB_ID(vehicle_control_mode)};
 	uORB::SubscriptionData<vehicle_air_data_s> _vehicle_air_data_sub{ORB_ID(vehicle_air_data)};
 	uORB::Subscription _vehicle_attitude_sub{ORB_ID(vehicle_attitude)};
+	uORB::Subscription _vehicle_landed_sub{ORB_ID(vehicle_land_detected)};
 	uORB::SubscriptionData<vehicle_status_s> _vehicle_status_sub{ORB_ID(vehicle_status)};
 	uORB::Subscription _fw_lateral_ctrl_sub{ORB_ID(fw_lateral_control_setpoint)};
 	uORB::Subscription _fw_longitudinal_ctrl_sub{ORB_ID(fw_longitudinal_control_setpoint)};
-	uORB::Subscription _long_control_limits_sub{ORB_ID(longitudinal_control_limits)};
+	uORB::SubscriptionData<longitudinal_control_limits_s> _long_control_limits_sub{ORB_ID(longitudinal_control_limits)};
+	uORB::SubscriptionData<lateral_control_limits_s> _lateral_control_limits_sub{ORB_ID(lateral_control_limits)};
 
 	vehicle_local_position_s _local_pos{};
-	longitudinal_control_limits_s _long_control_limits{};
 
 	uORB::Publication <vehicle_attitude_setpoint_s> _attitude_sp_pub;
 	uORB::Publication <tecs_status_s> _tecs_status_pub{ORB_ID(tecs_status)};
@@ -151,7 +154,8 @@ private:
 		(ParamFloat<px4::params::FW_T_SPD_PRC_STD>) _param_process_noise_standard_dev,
 
 		(ParamFloat<px4::params::FW_THR_SLEW_MAX>) _param_fw_thr_slew_max,
-		(ParamFloat<px4::params::FW_LND_THRTC_SC>) _param_fw_thrtc_sc
+		(ParamFloat<px4::params::FW_LND_THRTC_SC>) _param_fw_thrtc_sc,
+		(ParamFloat<px4::params::FW_T_THR_LOW_HGT>) _param_fw_t_thr_low_hgt
 	)
 
 
@@ -178,8 +182,12 @@ private:
 		matrix::Vector2f ground_speed;
 		matrix::Vector2f wind_speed;
 	} _lateral_control_state{};
-
+	bool _need_report_npfg_uncertain_condition{false}; ///< boolean if reporting of uncertain npfg output condition is needed
+	hrt_abstime _time_since_first_reduced_roll{0U}; ///< absolute time since start when entering reduced roll angle for the first time
+	hrt_abstime _time_since_last_npfg_call{0U}; 	///< absolute time since start when the npfg reduced roll angle calculations was last performed
 	vehicle_attitude_setpoint_s _att_sp{};
+
+	bool _landed{false};
 
 	PerformanceModel _performance_model;
 	TECS _tecs;
@@ -207,6 +215,12 @@ private:
 	void updateWind();
 
 	void updateTECSAltitudeTimeConstant(const bool is_low_height, const float dt);
+
+	bool checkLowHeightConditions();
+
+	float getGuidanceQualityFactor(const vehicle_local_position_s &local_pos, const bool is_wind_valid) const;
+
+	float getCorrectedLateralAccelSetpoint(float lateral_accel_sp);
 };
 
 

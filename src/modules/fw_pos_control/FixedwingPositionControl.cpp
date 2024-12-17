@@ -372,52 +372,6 @@ FixedwingPositionControl::adapt_airspeed_setpoint(const float control_interval, 
 }
 
 void
-FixedwingPositionControl::status_publish()
-{
-//	position_controller_status_s pos_ctrl_status = {};
-//
-//	npfg_status_s npfg_status = {};
-//
-//	npfg_status.wind_est_valid = _wind_valid;
-//
-//	const float bearing = _directional_guidance.getBearing();
-//
-//	pos_ctrl_status.nav_bearing = bearing;
-//	pos_ctrl_status.target_bearing = _target_bearing;
-//	pos_ctrl_status.xtrack_error = _directional_guidance.getTrackError();
-//	pos_ctrl_status.acceptance_radius = _directional_guidance.switchDistance(500.0f);
-//
-//	npfg_status.lat_accel = _directional_guidance.getLateralAccel();
-//	npfg_status.lat_accel_ff = _directional_guidance.getLateralAccelFF();
-//	npfg_status.heading_ref = _directional_guidance.getHeadingRef();
-//	npfg_status.bearing = bearing;
-//	npfg_status.bearing_feas = _directional_guidance.getBearingFeas();
-//	npfg_status.bearing_feas_on_track = _directional_guidance.getOnTrackBearingFeas();
-//	npfg_status.signed_track_error = _directional_guidance.getTrackError();
-//	npfg_status.track_error_bound = _directional_guidance.getTrackErrorBound();
-//	npfg_status.airspeed_ref = _directional_guidance.getAirspeedRef();
-//	npfg_status.min_ground_speed_ref = _directional_guidance.getMinGroundSpeedRef();
-//	npfg_status.adapted_period = _directional_guidance.getAdaptedPeriod();
-//	npfg_status.p_gain = _directional_guidance.getPGain();
-//	npfg_status.time_const = _directional_guidance.getTimeConst();
-//	npfg_status.can_run_factor = _directional_guidance.canRun(_local_pos, _wind_valid);
-//	npfg_status.timestamp = hrt_absolute_time();
-//
-//	_npfg_status_pub.publish(npfg_status);
-//
-//	pos_ctrl_status.wp_dist = get_distance_to_next_waypoint(_current_latitude, _current_longitude,
-//				  _pos_sp_triplet.current.lat, _pos_sp_triplet.current.lon);
-//
-//	pos_ctrl_status.yaw_acceptance = NAN;
-//
-//	pos_ctrl_status.timestamp = hrt_absolute_time();
-//
-//	pos_ctrl_status.type = _position_sp_type;
-//
-//	_pos_ctrl_status_pub.publish(pos_ctrl_status);
-}
-
-void
 FixedwingPositionControl::landing_status_publish()
 {
 	position_controller_landing_status_s pos_ctrl_landing_status = {};
@@ -732,9 +686,7 @@ FixedwingPositionControl::control_auto(const float control_interval, const Vecto
 
 	switch (position_sp_type) {
 	case position_setpoint_s::SETPOINT_TYPE_IDLE: {
-			fw_lateral_control_setpoint_s lateral_ctrl_sp {empty_lateral_control_setpoint};
-			lateral_ctrl_sp.lateral_acceleration_setpoint = 0.0f;
-			_lateral_ctrl_sp_pub.publish(lateral_ctrl_sp);
+			control_idle();
 			break;
 		}
 
@@ -778,11 +730,39 @@ FixedwingPositionControl::control_auto(const float control_interval, const Vecto
 	}
 }
 
+void FixedwingPositionControl::control_idle()
+{
+	const hrt_abstime  now = hrt_absolute_time();
+	fw_lateral_control_setpoint_s lateral_ctrl_sp {empty_lateral_control_setpoint};
+	lateral_ctrl_sp.timestamp = now;
+	lateral_ctrl_sp.lateral_acceleration_setpoint = 0.0f;
+	_lateral_ctrl_sp_pub.publish(lateral_ctrl_sp);
+
+	fw_longitudinal_control_setpoint_s long_contrl_sp {empty_longitudinal_control_setpoint};
+	long_contrl_sp.timestamp = now;
+	_longitudinal_ctrl_sp_pub.publish(long_contrl_sp);
+
+	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = now};
+	setDefaultLongControlLimits(longitudinal_control_limits);
+	longitudinal_control_limits.throttle_max = 0.f;
+	longitudinal_control_limits.throttle_min = 0.f;
+	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
+}
+
+void FixedwingPositionControl::setDefaultLongControlLimits(longitudinal_control_limits_s &longitudinal_control_limits)
+const
+{
+	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
+	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
+	longitudinal_control_limits.throttle_min = _param_fw_thr_min.get();
+	longitudinal_control_limits.throttle_max = _param_fw_thr_max.get();
+	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
+	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+}
+
 void
 FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_interval)
 {
-	//const bool is_low_height = checkLowHeightConditions();
-
 	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
 		.timestamp = hrt_absolute_time(),
 		.height_rate_setpoint = NAN,
@@ -801,9 +781,7 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 	}
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = _param_fw_thr_min.get();
+	setDefaultLongControlLimits(longitudinal_control_limits);
 	longitudinal_control_limits.throttle_max = throttle_max;
 	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
@@ -901,17 +879,17 @@ FixedwingPositionControl::control_auto_position(const float control_interval, co
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr)
 {
 	const float acc_rad = _directional_guidance.switchDistance(500.0f);
-	float tecs_fw_thr_min;
-	float tecs_fw_thr_max;
+	float throttle_min;
+	float throttle_max;
 
 	if (pos_sp_curr.gliding_enabled) {
 		/* enable gliding with this waypoint */
-		tecs_fw_thr_min = 0.0;
-		tecs_fw_thr_max = 0.0;
+		throttle_min = 0.0;
+		throttle_max = 0.0;
 
 	} else {
-		tecs_fw_thr_min = _param_fw_thr_min.get();
-		tecs_fw_thr_max = _param_fw_thr_max.get();
+		throttle_min = _param_fw_thr_min.get();
+		throttle_max = _param_fw_thr_max.get();
 	}
 
 	// waypoint is a plain navigation waypoint
@@ -962,12 +940,9 @@ FixedwingPositionControl::control_auto_position(const float control_interval, co
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = tecs_fw_thr_min;
-	longitudinal_control_limits.throttle_max = tecs_fw_thr_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+	setDefaultLongControlLimits(longitudinal_control_limits);
+	longitudinal_control_limits.throttle_min = throttle_min;
+	longitudinal_control_limits.throttle_max = throttle_max;
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 	Vector2f curr_pos_local{_local_pos.x, _local_pos.y};
@@ -987,7 +962,10 @@ FixedwingPositionControl::control_auto_position(const float control_interval, co
 	lateral_ctrl_sp.timestamp = hrt_absolute_time();
 	lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
 	lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
-	_lateral_limits.roll_max = radians(_param_fw_r_lim.get());
+
+	lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+	lateral_limits.lateral_accel_max = rollAngleToLateralAccel(radians(_param_fw_r_lim.get()));
+	_lateral_ctrl_limits_pub.publish(lateral_limits);
 
 	_lateral_ctrl_sp_pub.publish(lateral_ctrl_sp);
 }
@@ -996,19 +974,6 @@ void
 FixedwingPositionControl::control_auto_velocity(const float control_interval, const Vector2d &curr_pos,
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr)
 {
-	float tecs_fw_thr_min;
-	float tecs_fw_thr_max;
-
-	if (pos_sp_curr.gliding_enabled) {
-		/* enable gliding with this waypoint */
-		tecs_fw_thr_min = 0.0;
-		tecs_fw_thr_max = 0.0;
-
-	} else {
-		tecs_fw_thr_min = _param_fw_thr_min.get();
-		tecs_fw_thr_max = _param_fw_thr_max.get();
-	}
-
 	//Offboard velocity control
 	Vector2f target_velocity{pos_sp_curr.vx, pos_sp_curr.vy};
 	const float target_bearing = wrap_pi(atan2f(target_velocity(1), target_velocity(0)));
@@ -1026,8 +991,6 @@ FixedwingPositionControl::control_auto_velocity(const float control_interval, co
 
 	_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
-
-
 	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
 		.timestamp = hrt_absolute_time(),
 		.height_rate_setpoint = pos_sp_curr.vz,
@@ -1038,12 +1001,13 @@ FixedwingPositionControl::control_auto_velocity(const float control_interval, co
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = tecs_fw_thr_min;
-	longitudinal_control_limits.throttle_max = tecs_fw_thr_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+	setDefaultLongControlLimits(longitudinal_control_limits);
+
+	if (pos_sp_curr.gliding_enabled) {
+		longitudinal_control_limits.throttle_min = 0.f;
+		longitudinal_control_limits.throttle_max = 0.f;
+	}
+
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 }
 
@@ -1074,19 +1038,6 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 	    pos_sp_curr.cruising_speed > FLT_EPSILON) {
 
 		airspeed_sp = pos_sp_curr.cruising_speed;
-	}
-
-	float tecs_fw_thr_min;
-	float tecs_fw_thr_max;
-
-	if (pos_sp_curr.gliding_enabled) {
-		/* enable gliding with this waypoint */
-		tecs_fw_thr_min = 0.0;
-		tecs_fw_thr_max = 0.0;
-
-	} else {
-		tecs_fw_thr_min = _param_fw_thr_min.get();
-		tecs_fw_thr_max = _param_fw_thr_max.get();
 	}
 
 	/* waypoint is a loiter waypoint */
@@ -1132,6 +1083,8 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 
 	_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
+	lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+	lateral_limits.lateral_accel_max = rollAngleToLateralAccel(radians(_param_fw_r_lim.get()));
 
 	if (_landing_abort_status) {
 		if (pos_sp_curr.alt - _current_altitude  < kClearanceAltitudeBuffer) {
@@ -1140,10 +1093,12 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 
 		} else {
 			// continue straight until vehicle has sufficient altitude
-			_lateral_limits.roll_max = 0.0f;
+			lateral_limits.lateral_accel_max = 0.0f;
 		}
 
 	}
+
+	_lateral_ctrl_limits_pub.publish(lateral_limits);
 
 	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
 		.timestamp = hrt_absolute_time(),
@@ -1155,12 +1110,13 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = tecs_fw_thr_min;
-	longitudinal_control_limits.throttle_max = tecs_fw_thr_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+	setDefaultLongControlLimits(longitudinal_control_limits);
+
+	if (pos_sp_curr.gliding_enabled) {
+		longitudinal_control_limits.throttle_min = 0.f;
+		longitudinal_control_limits.throttle_max = 0.f;
+	}
+
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 }
 
@@ -1194,24 +1150,7 @@ FixedwingPositionControl::controlAutoFigureEight(const float control_interval, c
 
 	_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 	target_airspeed = _figure_eight.getAirspeedSetpoint();
-	_target_bearing = _figure_eight.getTargetBearing();
 	_closest_point_on_path = _figure_eight.getClosestPoint();
-
-	// TECS
-	float tecs_fw_thr_min;
-	float tecs_fw_thr_max;
-
-	if (pos_sp_curr.gliding_enabled) {
-		/* enable gliding with this waypoint */
-		tecs_fw_thr_min = 0.0;
-		tecs_fw_thr_max = 0.0;
-
-	} else {
-		tecs_fw_thr_min = _param_fw_thr_min.get();
-		tecs_fw_thr_max = _param_fw_thr_max.get();
-	}
-
-//	const bool is_low_height = checkLowHeightConditions();
 
 	const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
 		.timestamp = hrt_absolute_time(),
@@ -1223,12 +1162,13 @@ FixedwingPositionControl::controlAutoFigureEight(const float control_interval, c
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = tecs_fw_thr_min;
-	longitudinal_control_limits.throttle_max = tecs_fw_thr_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+	setDefaultLongControlLimits(longitudinal_control_limits);
+
+	if (pos_sp_curr.gliding_enabled) {
+		longitudinal_control_limits.throttle_min = 0.f;
+		longitudinal_control_limits.throttle_max = 0.f;
+	}
+
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 }
 
@@ -1252,19 +1192,6 @@ void
 FixedwingPositionControl::control_auto_path(const float control_interval, const Vector2d &curr_pos,
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_curr)
 {
-	float tecs_fw_thr_min;
-	float tecs_fw_thr_max;
-
-	if (pos_sp_curr.gliding_enabled) {
-		/* enable gliding with this waypoint */
-		tecs_fw_thr_min = 0.0;
-		tecs_fw_thr_max = 0.0;
-
-	} else {
-		tecs_fw_thr_min = _param_fw_thr_min.get();
-		tecs_fw_thr_max = _param_fw_thr_max.get();
-	}
-
 	// waypoint is a plain navigation waypoint
 	float target_airspeed = adapt_airspeed_setpoint(control_interval, pos_sp_curr.cruising_speed,
 				_performance_model.getMinimumCalibratedAirspeed(getLoadFactor()), ground_speed);
@@ -1298,12 +1225,14 @@ FixedwingPositionControl::control_auto_path(const float control_interval, const 
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-	longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = tecs_fw_thr_min;
-	longitudinal_control_limits.throttle_max = tecs_fw_thr_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+	setDefaultLongControlLimits(longitudinal_control_limits);
+
+	if (pos_sp_curr.gliding_enabled) {
+		longitudinal_control_limits.throttle_min = 0.f;
+		longitudinal_control_limits.throttle_max = 0.f;
+
+	}
+
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 }
 
@@ -1334,8 +1263,6 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		// adjust underspeed detection bounds for takeoff airspeed
 		adjusted_min_airspeed = takeoff_airspeed;
 	}
-
-	//const bool is_low_height = checkLowHeightConditions();
 
 	if (_runway_takeoff.runwayTakeoffEnabled()) {
 		if (!_runway_takeoff.isInitialized()) {
@@ -1384,8 +1311,9 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 			}
 		}
 
-		float target_airspeed = adapt_airspeed_setpoint(control_interval, takeoff_airspeed, adjusted_min_airspeed, ground_speed,
-					true);
+		const float target_airspeed = adapt_airspeed_setpoint(control_interval, takeoff_airspeed, adjusted_min_airspeed,
+					      ground_speed,
+					      true);
 
 		const PathControllerOutput sp = navigateLine(start_pos_local, takeoff_bearing, local_2D_position, ground_speed,
 						_wind_vel);
@@ -1421,15 +1349,11 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 		longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
+		setDefaultLongControlLimits(longitudinal_control_limits);
 		longitudinal_control_limits.pitch_min = pitch_min;
 		longitudinal_control_limits.pitch_max = pitch_max;
-		longitudinal_control_limits.throttle_min = _param_fw_thr_min.get();
-		longitudinal_control_limits.throttle_max = _param_fw_thr_max.get();
 		longitudinal_control_limits.climb_rate_max = _performance_model.getMaximumClimbRate(_air_density);
-		longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
-
-
 
 		_flaps_setpoint = _param_fw_flaps_to_scl.get();
 
@@ -1507,12 +1431,10 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 			_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 			longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
+			setDefaultLongControlLimits(longitudinal_control_limits);
 			longitudinal_control_limits.pitch_min = radians(_takeoff_pitch_min.get());
-			longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-			longitudinal_control_limits.throttle_min = _param_fw_thr_min.get();
 			longitudinal_control_limits.throttle_max = max_takeoff_throttle;
 			longitudinal_control_limits.climb_rate_max = _performance_model.getMaximumClimbRate(_air_density);
-			longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
 			_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 			//float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
@@ -1520,16 +1442,15 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		} else {
 			/* Tell the attitude controller to stop integrating while we are waiting for the launch */
 			_att_sp.reset_integral = true;
-			const PathControllerOutput sp = {.lateral_acceleration_feedforward = 0.0f};
 			fw_lateral_control_setpoint_s fw_lateral_ctrl_sp{empty_lateral_control_setpoint};
 			fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
-			fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
-			fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
-
+			fw_lateral_ctrl_sp.lateral_acceleration_setpoint = 0.f;
 			_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
-			/* Set default roll and pitch setpoints during detection phase */
-			//float yaw_body = _yaw;
+			fw_longitudinal_control_setpoint_s long_control_sp{empty_longitudinal_control_setpoint};
+			long_control_sp.timestamp = hrt_absolute_time();
+			long_control_sp.pitch_sp = radians(_takeoff_pitch_min.get());
+			_longitudinal_ctrl_sp_pub.publish(long_control_sp);
 		}
 
 		launch_detection_status_s launch_detection_status;
@@ -1559,8 +1480,8 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		adjusted_min_airspeed = airspeed_land;
 	}
 
-	float target_airspeed = adapt_airspeed_setpoint(control_interval, airspeed_land, adjusted_min_airspeed,
-				ground_speed);
+	const float target_airspeed = adapt_airspeed_setpoint(control_interval, airspeed_land, adjusted_min_airspeed,
+				      ground_speed);
 
 
 	// now handle position
@@ -1644,11 +1565,12 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 		fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
 		fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
+		_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
 		const float roll_wingtip_strike = getMaxRollAngleNearGround(_current_altitude, terrain_alt);
-		_lateral_limits.roll_max = roll_wingtip_strike;
-
-		_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
+		lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+		lateral_limits.lateral_accel_max = rollAngleToLateralAccel(roll_wingtip_strike);
+		_lateral_ctrl_limits_pub.publish(lateral_limits);
 
 		/* longitudinal guidance */
 
@@ -1727,10 +1649,11 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 		fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
 		fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
-
-		_lateral_limits.roll_max = getMaxRollAngleNearGround(_current_altitude, terrain_alt);
-
 		_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
+
+		lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+		lateral_limits.lateral_accel_max = rollAngleToLateralAccel(getMaxRollAngleNearGround(_current_altitude, terrain_alt));
+		_lateral_ctrl_limits_pub.publish(lateral_limits);
 
 		/* longitudinal guidance */
 
@@ -1750,14 +1673,11 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 		longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-		longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-		longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
+		setDefaultLongControlLimits(longitudinal_control_limits);
 		longitudinal_control_limits.throttle_min = _param_fw_thr_idle.get();
 		longitudinal_control_limits.throttle_max = _landed ? _param_fw_thr_idle.get() : _param_fw_thr_max.get();
-		longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 		longitudinal_control_limits.sink_rate_max = desired_max_sinkrate;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
-
 
 		// enable direct yaw control using rudder/wheel
 		_att_sp.fw_control_yaw_wheel = false;
@@ -1791,8 +1711,8 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		adjusted_min_airspeed = airspeed_land;
 	}
 
-	float target_airspeed = adapt_airspeed_setpoint(control_interval, airspeed_land, adjusted_min_airspeed,
-				ground_speed);
+	const float target_airspeed = adapt_airspeed_setpoint(control_interval, airspeed_land, adjusted_min_airspeed,
+				      ground_speed);
 
 
 	const Vector2f local_position{_local_pos.x, _local_pos.y};
@@ -1816,8 +1736,6 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 	if (fabsf(pos_sp_curr.loiter_radius) < FLT_EPSILON) {
 		loiter_radius = _param_nav_loiter_rad.get();
 	}
-
-
 
 	if ((_current_altitude < terrain_alt + flare_rel_alt) || _flare_states.flaring) {
 		// flare and land with minimal speed
@@ -1891,14 +1809,13 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 		longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-		longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-		longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
+		longitudinal_control_limits.pitch_min = pitch_min_rad;
+		longitudinal_control_limits.pitch_max = pitch_max_rad;
 		longitudinal_control_limits.throttle_min = _param_fw_thr_idle.get();
 		longitudinal_control_limits.throttle_max = throttle_max;
 		longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 		longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
-
 
 		// enable direct yaw control using rudder/wheel
 		_att_sp.fw_control_yaw_wheel = true;
@@ -1951,11 +1868,9 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 		longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
-		longitudinal_control_limits.pitch_min = radians(_param_fw_p_lim_min.get());
-		longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
+		setDefaultLongControlLimits(longitudinal_control_limits);
 		longitudinal_control_limits.throttle_min = _param_fw_thr_idle.get();
 		longitudinal_control_limits.throttle_max = _landed ? _param_fw_thr_idle.get() : _param_fw_thr_max.get();
-		longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 		longitudinal_control_limits.sink_rate_max = desired_max_sinkrate;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
@@ -1963,8 +1878,9 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		_att_sp.fw_control_yaw_wheel = false;
 	}
 
-
-	_lateral_limits.roll_max = getMaxRollAngleNearGround(_current_altitude, terrain_alt);
+	lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+	lateral_limits.lateral_accel_max = rollAngleToLateralAccel(getMaxRollAngleNearGround(_current_altitude, terrain_alt));
+	_lateral_ctrl_limits_pub.publish(lateral_limits);
 
 	_flaps_setpoint = _param_fw_flaps_lnd_scl.get();
 	_spoilers_setpoint = _param_fw_spoilers_lnd.get();
@@ -2009,16 +1925,13 @@ FixedwingPositionControl::control_manual_altitude(const float control_interval, 
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
+	setDefaultLongControlLimits(longitudinal_control_limits);
 	longitudinal_control_limits.pitch_min = min_pitch;
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = _param_fw_thr_min.get();
 	longitudinal_control_limits.throttle_max = throttle_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 	const float roll_body = _manual_control_setpoint.roll * radians(_param_fw_r_lim.get());
-	const PathControllerOutput sp = {.lateral_acceleration_feedforward = tan(roll_body) * CONSTANTS_ONE_G};
+	const PathControllerOutput sp = {.lateral_acceleration_feedforward = rollAngleToLateralAccel(roll_body)};
 	fw_lateral_control_setpoint_s fw_lateral_ctrl_sp{empty_lateral_control_setpoint};
 	fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 	fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
@@ -2033,8 +1946,8 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 {
 	updateManualTakeoffStatus();
 
-	float calibrated_airspeed_sp = adapt_airspeed_setpoint(control_interval, get_manual_airspeed_setpoint(),
-				       _performance_model.getMinimumCalibratedAirspeed(getLoadFactor()), ground_speed, !_completed_manual_takeoff);
+	const float calibrated_airspeed_sp = adapt_airspeed_setpoint(control_interval, get_manual_airspeed_setpoint(),
+					     _performance_model.getMinimumCalibratedAirspeed(getLoadFactor()), ground_speed, !_completed_manual_takeoff);
 	const float height_rate_sp = getManualHeightRateSetpoint();
 
 	// TECS may try to pitch down to gain airspeed if we underspeed, constrain the pitch when underspeeding if we are
@@ -2052,9 +1965,6 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 	if (_local_pos.xy_reset_counter != _xy_reset_counter) {
 		_time_last_xy_reset = _local_pos.timestamp;
 	}
-
-	Eulerf current_setpoint(Quatf(_att_sp.q_d));
-	float roll_body = current_setpoint.phi();
 
 	/* heading control */
 	// TODO: either make it course hold (easier) or a real heading hold (minus all the complexity here)
@@ -2114,12 +2024,9 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 	_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
 
 	longitudinal_control_limits_s longitudinal_control_limits{.timestamp = hrt_absolute_time()};
+	setDefaultLongControlLimits(longitudinal_control_limits);
 	longitudinal_control_limits.pitch_min = min_pitch;
-	longitudinal_control_limits.pitch_max = radians(_param_fw_p_lim_max.get());
-	longitudinal_control_limits.throttle_min = _param_fw_thr_min.get();
 	longitudinal_control_limits.throttle_max = throttle_max;
-	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
-	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
 	_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 	if (!_yaw_lock_engaged || fabsf(_manual_control_setpoint.roll) >= HDG_HOLD_MAN_INPUT_THRESH ||
@@ -2128,8 +2035,8 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 		_hdg_hold_enabled = false;
 		_yaw_lock_engaged = false;
 
-		roll_body = _manual_control_setpoint.roll * radians(_param_fw_r_lim.get());
-		const PathControllerOutput sp = {.lateral_acceleration_feedforward = tan(roll_body) * CONSTANTS_ONE_G};
+		const float roll_body = _manual_control_setpoint.roll * radians(_param_fw_r_lim.get());
+		const PathControllerOutput sp = {.lateral_acceleration_feedforward = rollAngleToLateralAccel(roll_body)};
 		fw_lateral_control_setpoint_s fw_lateral_ctrl_sp{empty_lateral_control_setpoint};
 		fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 		fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
@@ -2139,40 +2046,22 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 	}
 }
 
+float FixedwingPositionControl::rollAngleToLateralAccel(float roll_body) const
+{
+	return tan(roll_body) * CONSTANTS_ONE_G;
+}
+
 void FixedwingPositionControl::control_backtransition_heading_hold()
 {
 	if (!PX4_ISFINITE(_backtrans_heading)) {
 		_backtrans_heading = _local_pos.heading;
 	}
 
-	float true_airspeed = _airspeed_eas * _eas2tas;
+	fw_lateral_control_setpoint_s fw_lateral_ctrl_sp{empty_lateral_control_setpoint};
+	fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
+	fw_lateral_ctrl_sp.heading_setpoint = _backtrans_heading;
 
-	if (!_airspeed_valid) {
-		true_airspeed = _performance_model.getCalibratedTrimAirspeed() * _eas2tas;
-	}
-
-	// we can achieve heading control by setting airspeed and groundspeed vector equal
-	const Vector2f airspeed_vector = Vector2f(cosf(_local_pos.heading), sinf(_local_pos.heading)) * true_airspeed;
-	const Vector2f &ground_speed = airspeed_vector;
-
-	_npfg.setAirspeedNom(_performance_model.getCalibratedTrimAirspeed() * _eas2tas);
-	_npfg.setAirspeedMax(_performance_model.getMaximumCalibratedAirspeed() * _eas2tas);
-
-	Vector2f virtual_target_point = Vector2f(cosf(_backtrans_heading), sinf(_backtrans_heading)) * HDG_HOLD_DIST_NEXT;
-
-	navigateLine(Vector2f(0.f, 0.f), virtual_target_point, Vector2f(0.f, 0.f), ground_speed, Vector2f(0.f, 0.f));
-
-	const float roll_body = getCorrectedNpfgRollSetpoint();
-
-	const float yaw_body = _backtrans_heading;
-
-	// these values are overriden by transition logic
-	_att_sp.thrust_body[0] = _param_fw_thr_min.get();
-	const float pitch_body = 0.0f;
-
-	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
-	attitude_setpoint.copyTo(_att_sp.q_d);
-
+	_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 }
 
 void FixedwingPositionControl::control_backtransition_line_follow(const Vector2f &ground_speed,
@@ -2200,8 +2089,6 @@ void FixedwingPositionControl::control_backtransition_line_follow(const Vector2f
 	fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
 
 	_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
-
-
 }
 
 void
@@ -2549,23 +2436,6 @@ FixedwingPositionControl::reset_landing_state()
 	}
 }
 
-float
-FixedwingPositionControl::constrainRollNearGround(const float roll_setpoint, const float altitude,
-		const float terrain_altitude) const
-{
-	// we want the wings level when at the wing height above ground
-	const float height_above_ground = math::max(altitude - (terrain_altitude + _param_fw_wing_height.get()), 0.0f);
-
-	// this is a conservative (linear) approximation of the roll angle that would cause wing tip strike
-	// roll strike = arcsin( 2 * height / span )
-	// d(roll strike)/d(height) = 2 / span / cos(2 * height / span)
-	// d(roll strike)/d(height) (@height=0) = 2 / span
-	// roll strike ~= 2 * height / span
-	const float roll_wingtip_strike = 2.0f * height_above_ground / _param_fw_wing_span.get();
-
-	return math::constrain(roll_setpoint, -roll_wingtip_strike, roll_wingtip_strike);
-}
-
 float FixedwingPositionControl::getMaxRollAngleNearGround(const float altitude, const float terrain_altitude) const
 {
 	// we want the wings level when at the wing height above ground
@@ -2638,14 +2508,6 @@ FixedwingPositionControl::initializeAutoLanding(const hrt_abstime &now, const po
 		_time_started_landing = now;
 	}
 }
-
-bool FixedwingPositionControl::checkLowHeightConditions()
-{
-	// Are conditions for low-height
-	return _param_fw_t_thr_low_hgt.get() >= 0.f && _local_pos.dist_bottom_valid
-	       && _local_pos.dist_bottom < _param_fw_t_thr_low_hgt.get();
-}
-
 
 Vector2f
 FixedwingPositionControl::calculateTouchdownPosition(const float control_interval, const Vector2f &local_land_position)
@@ -2839,9 +2701,6 @@ PathControllerOutput FixedwingPositionControl::navigateWaypoint(const Vector2f &
 	PathControllerOutput sp = _directional_guidance.guideToPath(vehicle_pos, ground_vel, wind_vel, unit_path_tangent,
 				  _closest_point_on_path, path_curvature);
 
-	// for logging - note we are abusing path tangent vs bearing definitions here. npfg interfaces need to be refined.
-	_target_bearing = atan2f(unit_path_tangent(1), unit_path_tangent(0));
-
 	return sp;
 }
 
@@ -2865,8 +2724,6 @@ PathControllerOutput FixedwingPositionControl::navigateLine(const Vector2f &poin
 	const PathControllerOutput sp = _directional_guidance.guideToPath(vehicle_pos, ground_vel, wind_vel, unit_path_tangent,
 					_closest_point_on_path, path_curvature);
 
-	// for logging - note we are abusing path tangent vs bearing definitions here. npfg interfaces need to be refined.
-	_target_bearing = atan2f(unit_path_tangent(1), unit_path_tangent(0));
 	return sp;
 }
 
@@ -2881,9 +2738,6 @@ PathControllerOutput FixedwingPositionControl::navigateLine(const Vector2f &poin
 	const float path_curvature = 0.f;
 	const PathControllerOutput sp = _directional_guidance.guideToPath(vehicle_pos, ground_vel, wind_vel, unit_path_tangent,
 					_closest_point_on_path, path_curvature);
-
-	// for logging - note we are abusing path tangent vs bearing definitions here. npfg interfaces need to be refined.
-	_target_bearing = line_bearing;
 
 	return sp;
 }
@@ -2922,7 +2776,6 @@ PathControllerOutput FixedwingPositionControl::navigateLoiter(const Vector2f &lo
 	const Vector2f unit_path_tangent = loiter_direction_multiplier * Vector2f{-unit_vec_center_to_closest_pt(1), unit_vec_center_to_closest_pt(0)};
 
 	const float path_curvature = loiter_direction_multiplier / radius;
-	_target_bearing = atan2f(unit_path_tangent(1), unit_path_tangent(0));
 	_closest_point_on_path = unit_vec_center_to_closest_pt * radius + loiter_center;
 	return _directional_guidance.guideToPath(vehicle_pos, ground_vel, wind_vel, unit_path_tangent,
 			loiter_center + unit_vec_center_to_closest_pt * radius, path_curvature);
@@ -2939,7 +2792,6 @@ PathControllerOutput FixedwingPositionControl::navigatePathTangent(const matrix:
 	}
 
 	const Vector2f unit_path_tangent{tangent_setpoint.normalized()};
-	_target_bearing = atan2f(unit_path_tangent(1), unit_path_tangent(0));
 	_closest_point_on_path = position_setpoint;
 	return _directional_guidance.guideToPath(vehicle_pos, ground_vel, wind_vel, tangent_setpoint.normalized(),
 			position_setpoint,
@@ -2951,7 +2803,6 @@ PathControllerOutput FixedwingPositionControl::navigateBearing(const matrix::Vec
 {
 
 	const Vector2f unit_path_tangent = Vector2f{cosf(bearing), sinf(bearing)};
-	_target_bearing = atan2f(unit_path_tangent(1), unit_path_tangent(0));
 	_closest_point_on_path = vehicle_pos;
 	return _directional_guidance.guideToPath(vehicle_pos, ground_vel, wind_vel, unit_path_tangent, vehicle_pos, 0.0f);
 }
@@ -3025,50 +2876,6 @@ float FixedwingPositionControl::getLoadFactor()
 	return load_factor_from_bank_angle;
 
 }
-
-float FixedwingPositionControl::mapLateralAccelerationToRollAngle(const float lateral_acceleration, hrt_abstime now) {
-	float roll_sp = atanf(lateral_acceleration * 1.0f / CONSTANTS_ONE_G);
-	if (_control_mode_current == FW_POSCTRL_MODE_AUTO_TAKEOFF) {
-
-		if (_runway_takeoff.runwayTakeoffEnabled()) {
-			roll_sp = _runway_takeoff.getRoll(roll_sp);
-		} else if (_launchDetector.getLaunchDetected() <= launch_detection_status_s::STATE_WAITING_FOR_LAUNCH) {
-			roll_sp = 0.f;
-		}
-
-	}
-
-	return roll_sp;
-}
-
-float FixedwingPositionControl::modifyPitchSetpoint(float pitch_sp) {
-	if (_control_mode_current == FW_POSCTRL_MODE_AUTO_TAKEOFF) {
-
-		if (_runway_takeoff.runwayTakeoffEnabled()) {
-			pitch_sp = _runway_takeoff.getPitch(pitch_sp);
-		} else if (_launchDetector.getLaunchDetected() <= launch_detection_status_s::STATE_WAITING_FOR_LAUNCH) {
-			pitch_sp = radians(_takeoff_pitch_min.get());
-		}
-	}
-
-	return pitch_sp;
-}
-
-float FixedwingPositionControl::modifyThrustSetpoint(float thrust) {
-	if (_control_mode_current == FW_POSCTRL_MODE_AUTO_TAKEOFF) {
-		if (_runway_takeoff.runwayTakeoffEnabled()) {
-			thrust = _runway_takeoff.getThrottle(_param_fw_thr_idle.get(), thrust);
-		} else if (_launchDetector.getLaunchDetected() > launch_detection_status_s::STATE_WAITING_FOR_LAUNCH) {
-
-			if (_launchDetector.getLaunchDetected() < launch_detection_status_s::STATE_FLYING) {
-				// explicitly set idle throttle until motors are enabled
-				thrust = _param_fw_thr_idle.get();
-			}
-		}
-	}
-	return thrust;
-}
-
 
 
 extern "C" __EXPORT int fw_pos_control_main(int argc, char *argv[])
