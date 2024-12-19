@@ -82,7 +82,7 @@ jobs:
           echo "::set-output name=tag_name::$(echo '${{ fromJSON(steps.docker.outputs.metadata)['image.name'] }}' | sed 's/,.*$//')"
 
       - name: make quick_check
-        uses: addnab/docker-run-action@v3
+        uses: PX4/docker-run-action@v0.1
         with:
           image: ${{ steps.tag_name.outputs.tag_name }}
           options: -v ${{ github.workspace }}:/workspace
