@@ -92,6 +92,10 @@ jobs:
             make px4_sitl_default
             make px4_fmu-v6x_default
 
+      - name: Setup tmate session
+        if: ${{ failure() }}
+        uses: mxschmitt/action-tmate@v3
+
       - name: Push container image
         uses: docker/build-push-action@v6
         with:
