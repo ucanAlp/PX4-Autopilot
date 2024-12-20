@@ -114,6 +114,14 @@ bool FixedwingLandDetector::_get_landed_state()
 		const float acc_hor = matrix::Vector2f(_acceleration).norm();
 		_xy_accel_filtered = _xy_accel_filtered * 0.8f + acc_hor * 0.18f;
 
+		// Check for angular velocity (disregard yaw)
+		float max_rotation_threshold = math::radians(_param_lndfw_rot_max.get());
+		val = _angular_velocity.xy().norm(); // TODO: check if this should be low pass filtered
+
+		if (PX4_ISFINITE(val)) {
+			_velocity_rotational = val;
+		}
+
 		// make groundspeed threshold tighter if airspeed is invalid
 		const float vel_xy_max_threshold = airspeed_invalid ? 0.7f * _param_lndfw_vel_xy_max.get() :
 						   _param_lndfw_vel_xy_max.get();
@@ -122,7 +130,8 @@ bool FixedwingLandDetector::_get_landed_state()
 		landDetected = _airspeed_filtered       < _param_lndfw_airspd.get()
 			       && _velocity_xy_filtered < vel_xy_max_threshold
 			       && _velocity_z_filtered  < _param_lndfw_vel_z_max.get()
-			       && _xy_accel_filtered    < _param_lndfw_xyaccel_max.get();
+			       && _xy_accel_filtered    < _param_lndfw_xyaccel_max.get()
+			       && _velocity_rotational  < max_rotation_threshold;
 
 	} else {
 		// Control state topic has timed out and we need to assume we're landed.
