@@ -796,7 +796,7 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 	fw_lateral_control_setpoint_s lateral_ctrl_sp = empty_lateral_control_setpoint;
 	lateral_ctrl_sp.timestamp = hrt_absolute_time();
 	const float roll_body = math::radians(_param_nav_gpsf_r.get()); // open loop loiter bank angle
-	lateral_ctrl_sp.lateral_acceleration_setpoint = tan(roll_body) * CONSTANTS_ONE_G;
+	lateral_ctrl_sp.lateral_acceleration_setpoint = rollAngleToLateralAccel(roll_body);
 	_lateral_ctrl_sp_pub.publish(lateral_ctrl_sp);
 }
 
@@ -2083,7 +2083,7 @@ FixedwingPositionControl::control_manual_position(const float control_interval, 
 
 float FixedwingPositionControl::rollAngleToLateralAccel(float roll_body) const
 {
-	return tan(roll_body) * CONSTANTS_ONE_G;
+	return tanf(roll_body) * CONSTANTS_ONE_G;
 }
 
 void FixedwingPositionControl::control_backtransition_heading_hold()
