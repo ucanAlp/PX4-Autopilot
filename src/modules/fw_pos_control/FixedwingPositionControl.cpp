@@ -758,6 +758,7 @@ const
 	longitudinal_control_limits.throttle_max = _param_fw_thr_max.get();
 	longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 	longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+	longitudinal_control_limits.disable_underspeed_protection = false;
 }
 
 void
@@ -1353,6 +1354,7 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		longitudinal_control_limits.pitch_min = pitch_min;
 		longitudinal_control_limits.pitch_max = pitch_max;
 		longitudinal_control_limits.climb_rate_max = _performance_model.getMaximumClimbRate(_air_density);
+		longitudinal_control_limits.disable_underspeed_protection = true;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 		_flaps_setpoint = _param_fw_flaps_to_scl.get();
@@ -1435,6 +1437,7 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 			longitudinal_control_limits.pitch_min = radians(_takeoff_pitch_min.get());
 			longitudinal_control_limits.throttle_max = max_takeoff_throttle;
 			longitudinal_control_limits.climb_rate_max = _performance_model.getMaximumClimbRate(_air_density);
+			longitudinal_control_limits.disable_underspeed_protection = true;
 			_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 			//float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
@@ -1617,6 +1620,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		longitudinal_control_limits.throttle_max = throttle_max;
 		longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 		longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+		longitudinal_control_limits.disable_underspeed_protection = true;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 		// enable direct yaw control using rudder/wheel
@@ -1815,6 +1819,7 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		longitudinal_control_limits.throttle_max = throttle_max;
 		longitudinal_control_limits.climb_rate_max = _param_climbrate_target.get();
 		longitudinal_control_limits.sink_rate_max = _param_sinkrate_target.get();
+		longitudinal_control_limits.disable_underspeed_protection = true;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
 		// enable direct yaw control using rudder/wheel

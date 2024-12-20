@@ -197,8 +197,9 @@ private:
 	void parameters_update();
 	void update_control_state();
 	void tecs_update_pitch_throttle(const float control_interval, float alt_sp, float airspeed_sp,
-					float pitch_min_rad, float pitch_max_rad, float throttle_min, float throttle_max,
-					const float desired_max_sinkrate, const float desired_max_climbrate, const bool is_low_height,
+					float pitch_min_rad, float pitch_max_rad, float throttle_min,
+					float throttle_max, const float desired_max_sinkrate,
+					const float desired_max_climbrate,
 					bool disable_underspeed_detection, float hgt_rate_sp);
 
 	void tecs_status_publish(float alt_sp, float equivalent_airspeed_sp, float true_airspeed_derivative_raw,

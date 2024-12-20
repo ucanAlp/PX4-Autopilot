@@ -142,16 +142,16 @@ void FwLateralLongitudinalControl::Run()
 
 		if (longitudinal_sp.timestamp > 0 && hrt_elapsed_time(&longitudinal_sp.timestamp) < 1_s) {
 			tecs_update_pitch_throttle(control_interval, longitudinal_sp.altitude_setpoint,
-						   PX4_ISFINITE(longitudinal_sp.equivalent_airspeed_setpoint) ? longitudinal_sp.equivalent_airspeed_setpoint :
+						   PX4_ISFINITE(longitudinal_sp.equivalent_airspeed_setpoint)
+						   ? longitudinal_sp.equivalent_airspeed_setpoint :
 						   _performance_model.getCalibratedTrimAirspeed(),
 						   _long_control_limits_sub.get().pitch_min,
 						   _long_control_limits_sub.get().pitch_max,
 						   _long_control_limits_sub.get().throttle_min,
 						   _long_control_limits_sub.get().throttle_max,
 						   _long_control_limits_sub.get().sink_rate_max,
-						   _long_control_limits_sub.get().climb_rate_max,
-						   false, // TODO, replace
-						   false, // TODO, replace
+						   _long_control_limits_sub.get().climb_rate_max, // TODO, replace
+						   _long_control_limits_sub.get().disable_underspeed_protection,
 						   longitudinal_sp.height_rate_setpoint
 						  );
 			pitch_sp = _tecs.get_pitch_setpoint();
@@ -160,9 +160,9 @@ void FwLateralLongitudinalControl::Run()
 
 			fw_longitudinal_control_setpoint_s longitudinal_control_status {
 				.timestamp = hrt_absolute_time(),
-				.height_rate_setpoint = 0.f, // TODO get from TECS
+				.height_rate_setpoint = _tecs.getStatus().control.altitude_rate_control,
 				.altitude_setpoint = longitudinal_sp.altitude_setpoint,
-				.equivalent_airspeed_setpoint = 0.f // TODO: get from TECS
+				.equivalent_airspeed_setpoint = _tecs.getStatus().true_airspeed_sp / _long_control_state.eas2tas,
 			};
 
 			_longitudinal_ctrl_status_pub.publish(longitudinal_control_status);
@@ -255,8 +255,9 @@ void FwLateralLongitudinalControl::Run()
 }
 void
 FwLateralLongitudinalControl::tecs_update_pitch_throttle(const float control_interval, float alt_sp, float airspeed_sp,
-		float pitch_min_rad, float pitch_max_rad, float throttle_min, float throttle_max,
-		const float desired_max_sinkrate, const float desired_max_climbrate, const bool is_low_height,
+		float pitch_min_rad, float pitch_max_rad, float throttle_min,
+		float throttle_max, const float desired_max_sinkrate,
+		const float desired_max_climbrate,
 		bool disable_underspeed_detection, float hgt_rate_sp)
 {
 	// do not run TECS if vehicle is a VTOL and we are in rotary wing mode or in transition
@@ -269,9 +270,6 @@ FwLateralLongitudinalControl::tecs_update_pitch_throttle(const float control_int
 	} else {
 		_tecs_is_running = true;
 	}
-
-	/* update TECS vehicle state estimates */
-
 
 	const float throttle_trim_compensated = _performance_model.getTrimThrottle(throttle_min,
 						throttle_max, airspeed_sp, _air_density);
