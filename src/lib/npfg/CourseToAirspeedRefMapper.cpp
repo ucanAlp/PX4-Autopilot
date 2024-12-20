@@ -5,7 +5,7 @@
 using matrix::Vector2f;
 
 float
-CourseToAirspeedRefMapper::mapBearingSetpointToHeadingSetpoint(const float bearing_setpoint, const Vector2f wind_vel,
+CourseToAirspeedRefMapper::mapBearingSetpointToHeadingSetpoint(const float bearing_setpoint, const Vector2f &wind_vel,
 		float airspeed) const
 {
 
