@@ -77,8 +77,8 @@ private:
 	float generateSteeringSetpoint();
 
 	/**
-	 * @brief Turn throttle and steering setpoint into motor and servo setpoint and publish
-	 * as ActuatorMotors and ActuatorsServos.
+	 * @brief Turn throttle and steering setpoint into motor and servo setpoints and publish
+	 * as ActuatorMotors and ActuatorServos.
 	 */
 	void generateActuatorSetpoint();
 
