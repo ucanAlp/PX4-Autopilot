@@ -33,54 +33,53 @@
 
 #pragma once
 
-// PX4 includes TODO: Check which ones are actually necessary
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/defines.h>
-#include <px4_platform_common/module.h>
+// PX4 includes
 #include <px4_platform_common/module_params.h>
-#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
-#include <lib/pure_pursuit/PurePursuit.hpp>
 
 // uORB includes
+#include <uORB/Publication.hpp>
 #include <uORB/Subscription.hpp>
-#include <uORB/topics/parameter_update.h>
+#include <uORB/topics/rover_rate_setpoint.h>
+#include <uORB/topics/rover_velocity_setpoint.h>
+#include <uORB/topics/vehicle_control_mode.h>
+#include <uORB/topics/manual_control_setpoint.h>
+#include <uORB/topics/trajectory_setpoint.h>
+#include <uORB/topics/vehicle_angular_velocity.h>
 
-// Local includes
-#include "AckermannRateControl/AckermannRateControl.hpp"
-
-class RoverAckermann : public ModuleBase<RoverAckermann>, public ModuleParams,
-	public px4::ScheduledWorkItem
+/**
+ * @brief Class for ackermann rate control.
+ */
+class AckermannRateControl : public ModuleParams
 {
 public:
 	/**
-	 * @brief Constructor for RoverAckermann
+	 * @brief Constructor for AckermannRateControl.
+	 * @param parent The parent ModuleParams object.
 	 */
-	RoverAckermann();
-	~RoverAckermann() override = default;
-
-	/** @see ModuleBase */
-	static int task_spawn(int argc, char *argv[]);
-
-	/** @see ModuleBase */
-	static int custom_command(int argc, char *argv[]);
-
-	/** @see ModuleBase */
-	static int print_usage(const char *reason = nullptr);
-
-	bool init();
-
-private:
-	void Run() override;
+	AckermannRateControl(ModuleParams *parent);
+	~AckermannRateControl() = default;
 
 	/**
-	 * @brief Update uORB subscriptions.
+	 * @brief Update rate controller.
 	 */
-	void updateSubscriptions();
+	void updateRateControl();
 
-	// uORB subscriptions
-	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
+private:
+	/**
+	 * @brief Generate rate setpoint from manual or offboard and publish it as RoverRateSetpoint.
+	 */
+	void generateRateSetpoint();
 
-	// Class instances
-	AckermannRateControl _ackermann_rate_control{this};
+	/**
+	 * @brief Turn rate setpoint into a normalized steering angle.
+	 * @return Steering angle [-1, 1].
+	 */
+	float generateSteeringSetpoint();
+
+	/**
+	 * @brief Turn throttle and steering setpoint into motor and servo setpoint and publish
+	 * as ActuatorMotors and ActuatorsServos.
+	 */
+	void generateActuatorSetpoint();
 
 };

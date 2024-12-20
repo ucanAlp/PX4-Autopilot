@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2025 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2024 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,56 +31,13 @@
  *
  ****************************************************************************/
 
-#pragma once
+#include "AckermannRateControl.hpp"
 
-// PX4 includes TODO: Check which ones are actually necessary
-#include <px4_platform_common/px4_config.h>
-#include <px4_platform_common/defines.h>
-#include <px4_platform_common/module.h>
-#include <px4_platform_common/module_params.h>
-#include <px4_platform_common/px4_work_queue/ScheduledWorkItem.hpp>
-#include <lib/pure_pursuit/PurePursuit.hpp>
-
-// uORB includes
-#include <uORB/Subscription.hpp>
-#include <uORB/topics/parameter_update.h>
-
-// Local includes
-#include "AckermannRateControl/AckermannRateControl.hpp"
-
-class RoverAckermann : public ModuleBase<RoverAckermann>, public ModuleParams,
-	public px4::ScheduledWorkItem
+AckermannRateControl::AckermannRateControl(ModuleParams *parent) : ModuleParams(parent)
 {
-public:
-	/**
-	 * @brief Constructor for RoverAckermann
-	 */
-	RoverAckermann();
-	~RoverAckermann() override = default;
+}
 
-	/** @see ModuleBase */
-	static int task_spawn(int argc, char *argv[]);
+void AckermannRateControl::updateRateControl()
+{
 
-	/** @see ModuleBase */
-	static int custom_command(int argc, char *argv[]);
-
-	/** @see ModuleBase */
-	static int print_usage(const char *reason = nullptr);
-
-	bool init();
-
-private:
-	void Run() override;
-
-	/**
-	 * @brief Update uORB subscriptions.
-	 */
-	void updateSubscriptions();
-
-	// uORB subscriptions
-	uORB::Subscription _parameter_update_sub{ORB_ID(parameter_update)};
-
-	// Class instances
-	AckermannRateControl _ackermann_rate_control{this};
-
-};
+}
