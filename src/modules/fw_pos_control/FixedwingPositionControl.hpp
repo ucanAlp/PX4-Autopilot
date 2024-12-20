@@ -392,7 +392,6 @@ private:
 
 	// ESTIMATOR RESET COUNTERS
 	uint8_t _xy_reset_counter{0};
-	uint8_t _z_reset_counter{0};
 	uint64_t _time_last_xy_reset{0};
 
 	// LATERAL-DIRECTIONAL GUIDANCE
@@ -852,6 +851,7 @@ private:
 					     const matrix::Vector2f &wind_vel);
 
 	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::FW_PSP_OFF>) _param_fw_psp_off,
 		(ParamFloat<px4::params::FW_GND_SPD_MIN>) _param_fw_gnd_spd_min,
 
 		(ParamFloat<px4::params::FW_PN_R_SLEW_MAX>) _param_fw_pn_r_slew_max,

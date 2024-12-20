@@ -48,7 +48,7 @@ using matrix::Vector2d;
 using matrix::Vector3f;
 using matrix::wrap_pi;
 
-const fw_lateral_control_setpoint_s empty_lateral_control_setpoint = {.timestamp = 0, .course_setpoint = NAN, .heading_setpoint = NAN, .lateral_acceleration_setpoint = NAN, .roll_sp = NAN};
+const fw_lateral_control_setpoint_s empty_lateral_control_setpoint = {.timestamp = 0, .course_setpoint = NAN, .heading_setpoint = NAN, .lateral_acceleration_setpoint = NAN, .roll_sp = NAN, .heading_sp_runway_takeoff = NAN, .reset_integral = false};
 const fw_longitudinal_control_setpoint_s empty_longitudinal_control_setpoint = {.timestamp = 0, .height_rate_setpoint = NAN, .altitude_setpoint = NAN, .equivalent_airspeed_setpoint = NAN, .pitch_sp = NAN, .thrust_sp = NAN};
 FixedwingPositionControl::FixedwingPositionControl(bool vtol) :
 	ModuleParams(nullptr),
@@ -739,6 +739,8 @@ void FixedwingPositionControl::control_idle()
 	_lateral_ctrl_sp_pub.publish(lateral_ctrl_sp);
 
 	fw_longitudinal_control_setpoint_s long_contrl_sp {empty_longitudinal_control_setpoint};
+	long_contrl_sp.pitch_sp = math::radians(_param_fw_psp_off.get());
+	long_contrl_sp.thrust_sp = 0.0f;
 	long_contrl_sp.timestamp = now;
 	_longitudinal_ctrl_sp_pub.publish(long_contrl_sp);
 
@@ -1323,28 +1325,30 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 		fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 		fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
 		fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
-
+		fw_lateral_ctrl_sp.reset_integral = _runway_takeoff.resetIntegrators();
+		fw_lateral_ctrl_sp.heading_sp_runway_takeoff = _runway_takeoff.controlYaw() ? _runway_takeoff.getYaw(
+					sp.course_setpoint) : NAN;
+		fw_lateral_ctrl_sp.roll_sp = _runway_takeoff.getRoll();
 		_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
-
+		const float roll_wingtip_strike = getMaxRollAngleNearGround(_current_altitude, _takeoff_ground_alt);
+		lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+		lateral_limits.lateral_accel_max = rollAngleToLateralAccel(roll_wingtip_strike);
+		_lateral_ctrl_limits_pub.publish(lateral_limits);
 
 		// update tecs
 		const float pitch_max = _runway_takeoff.getMaxPitch(math::radians(_param_fw_p_lim_max.get()));
 		const float pitch_min = _runway_takeoff.getMinPitch(math::radians(_takeoff_pitch_min.get()),
 					math::radians(_param_fw_p_lim_min.get()));
 
-		if (_runway_takeoff.resetIntegrators()) {
-			// reset integrals except yaw (which also counts for the wheel controller)
-			_att_sp.reset_integral = true;
-
-			// throttle is open loop anyway during ground roll, no need to wind up the integrator
-		}
 
 		const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
 			.timestamp = hrt_absolute_time(),
 			.height_rate_setpoint = NAN,
 			.altitude_setpoint = altitude_setpoint_amsl,
 			.equivalent_airspeed_setpoint = target_airspeed,
+			.pitch_sp = _runway_takeoff.getPitch(),
+			.thrust_sp = _runway_takeoff.getThrottle(_param_fw_thr_idle.get())
 		};
 
 		_longitudinal_ctrl_sp_pub.publish(fw_longitudinal_control_sp);
@@ -1421,6 +1425,11 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 
 			_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
+			const float roll_wingtip_strike = getMaxRollAngleNearGround(_current_altitude, _takeoff_ground_alt);
+			lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
+			lateral_limits.lateral_accel_max = rollAngleToLateralAccel(roll_wingtip_strike);
+			_lateral_ctrl_limits_pub.publish(lateral_limits);
+
 			const float max_takeoff_throttle = (_launchDetector.getLaunchDetected() < launch_detection_status_s::STATE_FLYING) ?
 							   _param_fw_thr_idle.get() : _param_fw_thr_max.get();
 			const fw_longitudinal_control_setpoint_s fw_longitudinal_control_sp = {
@@ -1443,11 +1452,11 @@ FixedwingPositionControl::control_auto_takeoff(const hrt_abstime &now, const flo
 			//float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
 
 		} else {
-			/* Tell the attitude controller to stop integrating while we are waiting for the launch */
-			_att_sp.reset_integral = true;
 			fw_lateral_control_setpoint_s fw_lateral_ctrl_sp{empty_lateral_control_setpoint};
 			fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 			fw_lateral_ctrl_sp.lateral_acceleration_setpoint = 0.f;
+			/* Tell the attitude controller to stop integrating while we are waiting for the launch */
+			fw_lateral_ctrl_sp.reset_integral = true;
 			_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
 			fw_longitudinal_control_setpoint_s long_control_sp{empty_longitudinal_control_setpoint};
@@ -1568,6 +1577,7 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 		fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
 		fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
+		fw_lateral_ctrl_sp.heading_sp_runway_takeoff = sp.course_setpoint;
 		_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 
 		const float roll_wingtip_strike = getMaxRollAngleNearGround(_current_altitude, terrain_alt);
@@ -1687,7 +1697,6 @@ FixedwingPositionControl::control_auto_landing_straight(const hrt_abstime &now, 
 		_att_sp.fw_control_yaw_wheel = false;
 	}
 
-
 	_flaps_setpoint = _param_fw_flaps_lnd_scl.get();
 	_spoilers_setpoint = _param_fw_spoilers_lnd.get();
 
@@ -1774,6 +1783,7 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		fw_lateral_ctrl_sp.timestamp = hrt_absolute_time();
 		fw_lateral_ctrl_sp.course_setpoint = sp.course_setpoint;
 		fw_lateral_ctrl_sp.lateral_acceleration_setpoint = sp.lateral_acceleration_feedforward;
+		fw_lateral_ctrl_sp.heading_sp_runway_takeoff = sp.course_setpoint;
 
 		_lateral_ctrl_sp_pub.publish(fw_lateral_ctrl_sp);
 		/* longitudinal guidance */
@@ -1822,9 +1832,6 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		longitudinal_control_limits.disable_underspeed_protection = true;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
 
-		// enable direct yaw control using rudder/wheel
-		_att_sp.fw_control_yaw_wheel = true;
-
 		// XXX: hacky way to pass through manual nose-wheel incrementing. need to clean this interface.
 		if (_param_fw_lnd_nudge.get() > LandingNudgingOption::kNudgingDisabled) {
 			_att_sp.yaw_sp_move_rate = _manual_control_setpoint.yaw;
@@ -1841,9 +1848,6 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 	} else {
 
 		// follow the glide slope
-
-		/* lateral guidance */
-
 		const PathControllerOutput sp = navigateLoiter(local_landing_orbit_center, local_position, loiter_radius,
 						pos_sp_curr.loiter_direction_counter_clockwise,
 						ground_speed, _wind_vel);
@@ -1878,9 +1882,6 @@ FixedwingPositionControl::control_auto_landing_circular(const hrt_abstime &now, 
 		longitudinal_control_limits.throttle_max = _landed ? _param_fw_thr_idle.get() : _param_fw_thr_max.get();
 		longitudinal_control_limits.sink_rate_max = desired_max_sinkrate;
 		_longitudinal_ctrl_limits_pub.publish(longitudinal_control_limits);
-
-		// enable direct yaw control using rudder/wheel
-		_att_sp.fw_control_yaw_wheel = false;
 	}
 
 	lateral_control_limits_s lateral_limits{.timestamp = hrt_absolute_time()};
@@ -2143,10 +2144,6 @@ FixedwingPositionControl::Run()
 
 		// handle estimator reset events. we only adjust setpoins for manual modes
 		if (_control_mode.flag_control_manual_enabled) {
-			if (_control_mode.flag_control_altitude_enabled && _local_pos.z_reset_counter != _z_reset_counter) {
-				// make TECS accept step in altitude and demanded altitude
-			}
-
 			// adjust navigation waypoints in position control mode
 			if (_control_mode.flag_control_altitude_enabled && _control_mode.flag_control_velocity_enabled
 			    && _local_pos.xy_reset_counter != _xy_reset_counter) {
@@ -2404,7 +2401,6 @@ FixedwingPositionControl::Run()
 			_spoilers_setpoint_pub.publish(spoilers_setpoint);
 		}
 
-		_z_reset_counter = _local_pos.z_reset_counter;
 		_xy_reset_counter = _local_pos.xy_reset_counter;
 
 		perf_end(_loop_perf);

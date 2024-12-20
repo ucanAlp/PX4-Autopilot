@@ -133,6 +133,14 @@ void FwLateralLongitudinalControl::Run()
 		_control_mode_sub.update();
 		update_control_state();
 
+		if (_control_mode_sub.get().flag_control_manual_enabled && _control_mode_sub.get().flag_control_altitude_enabled
+		    && _local_pos.z_reset_counter != _z_reset_counter) {
+			if (_control_mode_sub.get().flag_control_altitude_enabled && _local_pos.z_reset_counter != _z_reset_counter) {
+				// make TECS accept step in altitude and demanded altitude
+				_tecs.handle_alt_step(_long_control_state.altitude_msl, _long_control_state.height_rate);
+			}
+		}
+
 		float pitch_sp{NAN};
 		float thrust_sp{NAN};
 
@@ -154,8 +162,8 @@ void FwLateralLongitudinalControl::Run()
 						   _long_control_limits_sub.get().disable_underspeed_protection,
 						   longitudinal_sp.height_rate_setpoint
 						  );
-			pitch_sp = _tecs.get_pitch_setpoint();
-			thrust_sp = _tecs.get_throttle_setpoint();
+			pitch_sp = PX4_ISFINITE(longitudinal_sp.pitch_sp) ? longitudinal_sp.pitch_sp : _tecs.get_pitch_setpoint();
+			thrust_sp = PX4_ISFINITE(longitudinal_sp.thrust_sp) ? longitudinal_sp.thrust_sp : _tecs.get_throttle_setpoint();
 			publish = true;
 
 			fw_longitudinal_control_setpoint_s longitudinal_control_status {
@@ -171,6 +179,7 @@ void FwLateralLongitudinalControl::Run()
 
 		fw_lateral_control_setpoint_s sp = {empty_lateral_control_setpoint};
 		float roll_sp {NAN};
+		float yaw_sp {NAN};
 
 		_fw_lateral_ctrl_sub.copy(&sp);
 
@@ -206,6 +215,10 @@ void FwLateralLongitudinalControl::Run()
 				roll_sp = mapLateralAccelerationToRollAngle(lateral_accel_sp);
 			}
 
+			_att_sp.reset_integral = sp.reset_integral;
+			_att_sp.fw_control_yaw_wheel = PX4_ISFINITE(sp.heading_sp_runway_takeoff);
+			yaw_sp = sp.heading_sp_runway_takeoff;
+
 			fw_lateral_control_setpoint_s status = {
 				.timestamp = sp.timestamp,
 				.course_setpoint = sp.course_setpoint,
@@ -222,8 +235,8 @@ void FwLateralLongitudinalControl::Run()
 		if (publish) {
 			float roll_body = PX4_ISFINITE(roll_sp) ? roll_sp : 0.0f;
 			float pitch_body = PX4_ISFINITE(pitch_sp) ? pitch_sp : 0.0f;
-			float yaw_body = _yaw;
-			float thrust_body_x = PX4_ISFINITE(thrust_sp) ? thrust_sp : 0.0f;
+			const float yaw_body = PX4_ISFINITE(yaw_sp) ? yaw_sp : _yaw;
+			const float thrust_body_x = PX4_ISFINITE(thrust_sp) ? thrust_sp : 0.0f;
 
 			if (_control_mode_sub.get().flag_control_manual_enabled) {
 				roll_body = constrain(roll_body, -radians(_param_fw_r_lim.get()),
@@ -246,11 +259,13 @@ void FwLateralLongitudinalControl::Run()
 				q.copyTo(_att_sp.q_d);
 
 				_att_sp.thrust_body[0] = thrust_body_x;
+
 				_attitude_sp_pub.publish(_att_sp);
 			}
 
 		}
 
+		_z_reset_counter = _local_pos.z_reset_counter;
 	}
 }
 void
@@ -419,11 +434,11 @@ int FwLateralLongitudinalControl::print_usage(const char *reason)
 	PRINT_MODULE_DESCRIPTION(
 		R"DESCR_STR(
 ### Description
-fw_pos_control is the fixed-wing position controller.
+fw_lat_lon_control computes attitude and throttle setpoints from lateral and longitudinal control setpoints.
 
 )DESCR_STR");
 
-	PRINT_MODULE_USAGE_NAME("fw_pos_control", "controller");
+	PRINT_MODULE_USAGE_NAME("fw_lat_lon_control", "controller");
 	PRINT_MODULE_USAGE_COMMAND("start");
 	PRINT_MODULE_USAGE_ARG("vtol", "VTOL mode", true);
 	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
