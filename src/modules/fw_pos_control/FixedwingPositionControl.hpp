@@ -258,6 +258,7 @@ private:
 		FW_POSCTRL_MODE_AUTO_LANDING_STRAIGHT,
 		FW_POSCTRL_MODE_AUTO_LANDING_CIRCULAR,
 		FW_POSCTRL_MODE_AUTO_PATH,
+		FW_POSCTRL_MODE_AUTO_KAMIKAZE,
 		FW_POSCTRL_MODE_MANUAL_POSITION,
 		FW_POSCTRL_MODE_MANUAL_ALTITUDE,
 		FW_POSCTRL_MODE_TRANSITION_TO_HOVER_LINE_FOLLOW,
@@ -598,6 +599,16 @@ private:
 	 * @param control_interval Time since last position control call [s]
 	 */
 	void control_auto_descend(const float control_interval);
+
+	/**
+	 * @brief Control position and diving/recovering into a ground target.
+	 *
+	 * behaviour of mission configured by KKZ_* prefixed parameters.
+	 *
+	 * @param control_interval Time since last position control call [s]
+	 */
+
+	void control_auto_kamikaze(const float control_interval);
 
 	/**
 	 * @brief Vehicle control for position waypoints.
@@ -1051,7 +1062,21 @@ private:
 		(ParamFloat<px4::params::FW_TKO_AIRSPD>) _param_fw_tko_airspd,
 
 		(ParamFloat<px4::params::RWTO_PSP>) _param_rwto_psp,
-		(ParamBool<px4::params::FW_LAUN_DETCN_ON>) _param_fw_laun_detcn_on
+		(ParamBool<px4::params::FW_LAUN_DETCN_ON>) _param_fw_laun_detcn_on,
+
+		(ParamFloat<px4::params::KKZ_QR_LAT>) _param_kkz_qr_lat,
+		(ParamFloat<px4::params::KKZ_QR_LON>) _param_kkz_qr_lon,
+		(ParamFloat<px4::params::KKZ_DIVE_ALT>) _param_kkz_dive_alt,
+		(ParamFloat<px4::params::KKZ_REC_ALT>) _param_kkz_rec_alt,
+		(ParamFloat<px4::params::KKZ_APPROACH_ANG>) _param_kkz_approach_ang,
+		(ParamFloat<px4::params::KKZ_APP_DIST>) _param_kkz_approach_dist,
+		(ParamFloat<px4::params::KKZ_LOITER_RAD>) _param_kkz_loiter_rad,
+		(ParamInt<px4::params::KKZ_LOITER_DIR>) _param_kkz_loiter_dir,
+		(ParamFloat<px4::params::KKZ_DIVE_ANG>) _param_kkz_dive_ang,
+		(ParamFloat<px4::params::KKZ_RET_LAT>) _param_kkz_ret_lat,
+		(ParamFloat<px4::params::KKZ_RET_LON>) _param_kkz_ret_lon,
+		(ParamFloat<px4::params::HEADING_RANGE>) _param_heading_range,
+		(ParamFloat<px4::params::TARGET_DIST_SP>) _param_target_dist_sp
 	)
 
 };

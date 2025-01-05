@@ -706,7 +706,9 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			return;
 		}
 
-	} else if ((_control_mode.flag_control_auto_enabled && _control_mode.flag_control_position_enabled)
+
+	}
+	else if ((_control_mode.flag_control_auto_enabled && _control_mode.flag_control_position_enabled)
 		   && (_position_setpoint_current_valid
 		       || _pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_IDLE)) {
 
@@ -751,7 +753,13 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_control_mode_current = FW_POSCTRL_MODE_AUTO;
 		}
 
-	} else if (_control_mode.flag_control_auto_enabled
+
+	}
+
+	else if(_control_mode.flag_control_kamikaze_enable){
+		_control_mode_current = FW_POSCTRL_MODE_AUTO_KAMIKAZE;
+
+	}else if (_control_mode.flag_control_auto_enabled
 		   && _control_mode.flag_control_climb_rate_enabled
 		   && _control_mode.flag_armed // only enter this modes if armed, as pure failsafe modes
 		   && !_control_mode.flag_control_position_enabled) {
@@ -810,6 +818,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 		_control_mode_current = FW_POSCTRL_MODE_MANUAL_ALTITUDE;
 
 	} else {
+		PX4_INFO("CONTROL MODE OTHER");
 		_control_mode_current = FW_POSCTRL_MODE_OTHER;
 	}
 }
@@ -977,6 +986,12 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 	const float pitch_body = get_tecs_pitch();
 	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
 	attitude_setpoint.copyTo(_att_sp.q_d);
+
+
+}
+
+void
+FixedwingPositionControl::control_auto_kamikaze(const float control_interval){
 
 }
 
@@ -2667,9 +2682,15 @@ FixedwingPositionControl::Run()
 		_new_landing_gear_position = landing_gear_s::GEAR_KEEP; // is overwritten in Takeoff and Land
 
 		switch (_control_mode_current) {
+
 		case FW_POSCTRL_MODE_AUTO: {
 				control_auto(control_interval, curr_pos, ground_speed, _pos_sp_triplet.previous, _pos_sp_triplet.current,
-					     _pos_sp_triplet.next);
+						_pos_sp_triplet.next);
+				break;
+			}
+
+		case FW_POSCTRL_MODE_AUTO_KAMIKAZE: {
+				control_auto_kamikaze(control_interval);
 				break;
 			}
 

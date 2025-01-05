@@ -90,7 +90,6 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_LOITER:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_TAKEOFF:
 	case vehicle_status_s::NAVIGATION_STATE_AUTO_VTOL_TAKEOFF:
-	case vehicle_status_s::NAVIGATION_STATE_AUTO_KAMIKAZE:
 		vehicle_control_mode.flag_control_auto_enabled = true;
 		vehicle_control_mode.flag_control_position_enabled = true;
 		vehicle_control_mode.flag_control_velocity_enabled = true;
@@ -101,6 +100,17 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 		vehicle_control_mode.flag_control_allocation_enabled = true;
 		break;
 
+	case vehicle_status_s::NAVIGATION_STATE_AUTO_KAMIKAZE:
+		vehicle_control_mode.flag_control_auto_enabled = true;
+		vehicle_control_mode.flag_control_position_enabled = true;
+		vehicle_control_mode.flag_control_velocity_enabled = true;
+		vehicle_control_mode.flag_control_altitude_enabled = true;
+		vehicle_control_mode.flag_control_climb_rate_enabled = true;
+		vehicle_control_mode.flag_control_attitude_enabled = true;
+		vehicle_control_mode.flag_control_rates_enabled = true;
+		vehicle_control_mode.flag_control_allocation_enabled = true;
+		vehicle_control_mode.flag_control_kamikaze_enable = true;
+		break;
 
 
 	case vehicle_status_s::NAVIGATION_STATE_ACRO:

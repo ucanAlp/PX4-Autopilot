@@ -32,6 +32,150 @@
  ****************************************************************************/
 
 /**
+ * QR Latitude
+ * @unit deg
+ * @min 0.000000
+ * @max 100.0000000
+ * @decimal 6
+ * @increment 0.000001
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_QR_LAT, 0.4f);
+
+
+/**
+ * QR Longitude
+ * @unit deg
+ * @min 0.000000
+ * @max 100.0000000
+ * @decimal 6
+ * @increment 0.000001
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_QR_LON, 0.4f);
+
+/**
+ * Return latitude
+ * @unit deg
+ * @min 0.000000
+ * @max 100.0000000
+ * @decimal 6
+ * @increment 0.000001
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_RET_LAT, 0.4f);
+
+/**
+ * Return Longitude
+ * @unit deg
+ * @min 0.000000
+ * @max 100.0000000
+ * @decimal 6
+ * @increment 0.000001
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_RET_LON, 0.4f);
+
+/**
+ * Kamikaze dive altitude
+ * @unit m
+ * @min 50
+ * @decimal 1
+ * @increment 0.5
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_DIVE_ALT, 100.f);
+
+/**
+ * Kamikaze recovery altitude
+ * @unit m
+ * @min 50
+ * @decimal 1
+ * @increment 0.5
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_REC_ALT, 100.f);
+
+
+/**
+ * Kamikaze heading angle offset to increment counter
+ * @unit m
+ * @min 1
+ * @decimal 1
+ * @increment 0.5
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(HEADING_RANGE, 1.5f);
+
+
+/**
+ * Approach angle into target WRT North
+ * @min 0
+ * @max 360
+ * @unit deg
+ * @decimal 3
+ *
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_APPROACH_ANG, 0.f);
+
+
+/**
+ * Approach angle into target WRT North
+ * @min 25
+ * @max 75
+ * @unit deg
+ * @decimal 1
+ *
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_DIVE_ANG, 30.f);
+
+
+/**
+ * Kamikaze approach point distance from QR target
+ * @unit m
+ * @min 10
+ * @max 100
+ * @decimal 1
+ * @increment 1
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_APP_DIST, 100.f);
+
+/**
+ * Kamikaze loiter radius
+ * @unit m
+ * @min 10
+ * @max 150
+ * @decimal 1
+ * @increment 1
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_LOITER_RAD, 100.f);
+
+
+/**
+ * Loiter direction during kamikaze mission
+ * @value 90 CCW
+ * @value 270 CW
+ * @group Kamikaze
+ */
+PARAM_DEFINE_INT32(KKZ_LOITER_DIR, 270);
+
+/**
+ * Target following offset
+ * @unit m
+ * @min 15
+ * @max 70
+ * @decimal 1
+ * @increment 0.5
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(TARGET_DIST_SP, 20.f);
+
+
+/**
  * Path navigation roll slew rate limit.
  *
  * Maximum change in roll angle setpoint per second.
