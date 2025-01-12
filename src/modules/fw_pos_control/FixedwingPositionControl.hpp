@@ -266,16 +266,49 @@ private:
 		FW_POSCTRL_MODE_OTHER
 	} _control_mode_current{FW_POSCTRL_MODE_OTHER}; // used to check if the mode has changed
 
+	enum KAMIKAZE_PHASE {
+		KKZ_MODE_APPROACHING_TO_LOITER,
+		KKZ_MODE_LOITERING,
+		KKZ_MODE_FLYING_TO_TARGET,
+		KKZ_MODE_DIVING,
+		KKZ_MODE_RECOVERING,
+		KKZ_MODE_RETURN_TO_SAFE_POINT,
+		KKZ_MODE_OTHER
+	}_kamikaze_mode_phase_curr{KKZ_MODE_OTHER};
+
+
+	 // Kamikaze mode phase transition conditions
+	bool loiter_approach_conditions_met{false};
+	bool loiter_exit_conditions_met{false};
+	bool target_approach_conditions_met{false};
+	bool dive_completion_conditions_met{false};
+	bool recovery_completion_conditions_met{false};
+	bool return_completion_conditions_met{false};
+	bool mission_start_conditions_met{false};
+
 	enum StickConfig {
 		STICK_CONFIG_SWAP_STICKS_BIT = (1 << 0),
 		STICK_CONFIG_ENABLE_AIRSPEED_SP_MANUAL_BIT = (1 << 1)
 	};
 
 	// VEHICLE STATES
-
 	double _current_latitude{0};
 	double _current_longitude{0};
 	float _current_altitude{0.f};
+
+	double _kkz_target_lat{0};
+	double _kkz_target_lon{0};
+	float _kkz_dive_alt{0};
+	float _kkz_rec_alt{0.f};
+	float _kkz_approach_ang{0.f};
+	int8_t _kkz_loiter_dir{1};
+	float  _kkz_loiter_rad{0.f};
+	float _kkz_dive_ang{0.f};
+	float _kkz_ret_lat{0.f};
+	float _kkz_ret_lon{0.f};
+	float _heading_range{0.f};
+	float _target_dist_sp{0.f};
+
 
 	float _roll{0.f};
 	float _pitch{0.0f};
@@ -609,6 +642,28 @@ private:
 	 */
 
 	void control_auto_kamikaze(const float control_interval);
+
+
+	/**
+	 * @brief Check that defined kamikaze mission is feasible or not.
+	 *
+	 * TODO: Work with npfg feasibility checker for high winds.
+	 *
+	 * @param control_interval Time since last position control call [s]
+	 */
+
+	void kamikaze_feasiblity_checker(const float control_interval);
+
+
+	/**
+	 * @brief Control diving phase. For now only based on gps position.
+	 *
+	 * TODO: Add vision based diving, if user publish target x,y location on image.
+	 *
+	 * @param control_interval Time since last position control call [s]
+	 */
+
+	void control_kamikaze_dive(const float control_interval);
 
 	/**
 	 * @brief Vehicle control for position waypoints.

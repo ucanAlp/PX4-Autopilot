@@ -150,6 +150,21 @@ FixedwingPositionControl::parameters_update()
 	_tecs.set_airspeed_rate_measurement_std_dev(_param_speed_rate_standard_dev.get());
 	_tecs.set_airspeed_filter_process_std_dev(_param_process_noise_standard_dev.get());
 
+	//Kamikaze params
+	_kkz_target_lat   = _param_kkz_qr_lat.get();
+	_kkz_target_lat   = _param_kkz_qr_lon.get();
+	_kkz_dive_alt     = _param_kkz_dive_alt.get();
+	_kkz_rec_alt      = _param_kkz_rec_alt.get();
+	_kkz_approach_ang = _param_kkz_approach_ang.get();
+	_kkz_loiter_dir   = _param_kkz_loiter_dir.get();
+	_kkz_loiter_rad   = _param_kkz_loiter_rad.get();
+	_kkz_dive_ang     = _param_kkz_dive_ang.get();
+	_kkz_ret_lat      = _param_kkz_ret_lat.get();
+	_kkz_ret_lon      = _param_kkz_ret_lon.get();
+	_heading_range    = _param_heading_range.get();
+	_target_dist_sp   = _param_target_dist_sp.get();
+
+
 	_performance_model.runSanityChecks();
 }
 
@@ -691,7 +706,8 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 
 	_skipping_takeoff_detection = false;
 	const bool doing_backtransition = _vehicle_status.in_transition_mode && !_vehicle_status.in_transition_to_fw;
-
+	PX4_INFO("BURADA");
+	PX4_INFO("CONTROL kamikaze mode flag :%d",_control_mode.flag_control_kamikaze_enable);
 	if (_control_mode.flag_control_offboard_enabled && _position_setpoint_current_valid
 	    && _control_mode.flag_control_position_enabled) {
 		if (PX4_ISFINITE(_pos_sp_triplet.current.vx) && PX4_ISFINITE(_pos_sp_triplet.current.vy)
@@ -706,7 +722,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			return;
 		}
 
-
+	PX4_INFO("OFFBOARD ENABLE");
 	}
 	else if ((_control_mode.flag_control_auto_enabled && _control_mode.flag_control_position_enabled)
 		   && (_position_setpoint_current_valid
@@ -753,10 +769,10 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_control_mode_current = FW_POSCTRL_MODE_AUTO;
 		}
 
-
+	PX4_INFO("VALID SETPOINT MISSION ENABLE:%" PRIu64 "\n", hrt_absolute_time());
 	}
-
 	else if(_control_mode.flag_control_kamikaze_enable){
+		PX4_INFO("CONTROL KAMIKAZE ENABLE");
 		_control_mode_current = FW_POSCTRL_MODE_AUTO_KAMIKAZE;
 
 	}else if (_control_mode.flag_control_auto_enabled
@@ -794,7 +810,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_control_mode_current = FW_POSCTRL_MODE_AUTO_CLIMBRATE;
 		}
 
-
+	PX4_INFO("GALIBA GPS FAILk");
 	} else if (_control_mode.flag_control_manual_enabled && _control_mode.flag_control_position_enabled) {
 		if (commanded_position_control_mode != FW_POSCTRL_MODE_MANUAL_POSITION) {
 			/* Need to init because last loop iteration was in a different mode */
@@ -802,7 +818,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_hdg_hold_enabled = false; // this makes sure the waypoints are reset below
 			_yaw_lock_engaged = false;
 
-			/* reset setpoints from other modes (auto) otherwise we won't
+			/* reset setpoints from other modes (auto) othPX4_INFO("CONTROL MODE OTHER");erwise we won't
 			 * level out without new manual input */
 			float roll_body = _manual_control_setpoint.roll * radians(_param_fw_r_lim.get());
 			float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
@@ -992,7 +1008,65 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 
 void
 FixedwingPositionControl::control_auto_kamikaze(const float control_interval){
+{
 
+    switch (_kamikaze_mode_phase_curr) {
+        case KKZ_MODE_APPROACHING_TO_LOITER:
+            // Loiter noktasına yaklaşma işlemleri
+            if (loiter_approach_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_LOITERING;
+            }
+            break;
+
+        case KKZ_MODE_LOITERING:
+            // Loiter noktası etrafında dönme işlemleri
+	    loiter_exit_conditions_met=false;
+            if (loiter_exit_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_FLYING_TO_TARGET;
+            }
+            break;
+
+        case KKZ_MODE_FLYING_TO_TARGET:
+            // Hedefe doğru uçuş işlemleri
+	    target_approach_conditions_met =false;
+            if (target_approach_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_DIVING;
+            }
+            break;
+
+        case KKZ_MODE_DIVING:
+            // Dalış işlemleri
+	    dive_completion_conditions_met=false;
+            if (dive_completion_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_RECOVERING;
+            }
+            break;
+
+        case KKZ_MODE_RECOVERING:
+            // Kurtarma işlemleri
+	    recovery_completion_conditions_met=false;
+            if (recovery_completion_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_RETURN_TO_SAFE_POINT;
+            }
+            break;
+
+        case KKZ_MODE_RETURN_TO_SAFE_POINT:
+            // Güvenli noktaya dönüş işlemleri
+	    return_completion_conditions_met=false;
+            if (return_completion_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_OTHER;
+            }
+            break;
+
+        case KKZ_MODE_OTHER:
+            // Diğer durumlar için işlemler
+	    mission_start_conditions_met=false;
+            if (mission_start_conditions_met) {
+                _kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
+            }
+            break;
+    }
+}
 }
 
 void
