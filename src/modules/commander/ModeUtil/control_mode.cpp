@@ -110,6 +110,7 @@ void getVehicleControlMode(uint8_t nav_state, uint8_t vehicle_type,
 		vehicle_control_mode.flag_control_rates_enabled = true;
 		vehicle_control_mode.flag_control_allocation_enabled = true;
 		vehicle_control_mode.flag_control_kamikaze_enable = true;
+		vehicle_control_mode.flag_control_manual_enabled = true;
 		break;
 
 

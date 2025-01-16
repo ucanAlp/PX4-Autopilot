@@ -706,8 +706,8 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 
 	_skipping_takeoff_detection = false;
 	const bool doing_backtransition = _vehicle_status.in_transition_mode && !_vehicle_status.in_transition_to_fw;
-	PX4_INFO("BURADA");
-	PX4_INFO("CONTROL kamikaze mode flag :%d",_control_mode.flag_control_kamikaze_enable);
+	//PX4_INFO("BURADA");
+	//PX4_INFO("CONTROL kamikaze mode flag :%d",_control_mode.flag_control_kamikaze_enable);
 	if (_control_mode.flag_control_offboard_enabled && _position_setpoint_current_valid
 	    && _control_mode.flag_control_position_enabled) {
 		if (PX4_ISFINITE(_pos_sp_triplet.current.vx) && PX4_ISFINITE(_pos_sp_triplet.current.vy)
@@ -769,7 +769,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_control_mode_current = FW_POSCTRL_MODE_AUTO;
 		}
 
-	PX4_INFO("VALID SETPOINT MISSION ENABLE:%" PRIu64 "\n", hrt_absolute_time());
+	//PX4_INFO("VALID SETPOINT MISSION ENABLE:%" PRIu64 "\n", hrt_absolute_time());
 	}
 	else if(_control_mode.flag_control_kamikaze_enable){
 		PX4_INFO("CONTROL KAMIKAZE ENABLE");
@@ -810,7 +810,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_control_mode_current = FW_POSCTRL_MODE_AUTO_CLIMBRATE;
 		}
 
-	PX4_INFO("GALIBA GPS FAILk");
+	PX4_INFO("GALIBA GPS FAIL");
 	} else if (_control_mode.flag_control_manual_enabled && _control_mode.flag_control_position_enabled) {
 		if (commanded_position_control_mode != FW_POSCTRL_MODE_MANUAL_POSITION) {
 			/* Need to init because last loop iteration was in a different mode */
@@ -818,7 +818,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_hdg_hold_enabled = false; // this makes sure the waypoints are reset below
 			_yaw_lock_engaged = false;
 
-			/* reset setpoints from other modes (auto) othPX4_INFO("CONTROL MODE OTHER");erwise we won't
+			/* reset setpoints from other modes (auto) otherwise we won't
 			 * level out without new manual input */
 			float roll_body = _manual_control_setpoint.roll * radians(_param_fw_r_lim.get());
 			float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
@@ -834,7 +834,7 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 		_control_mode_current = FW_POSCTRL_MODE_MANUAL_ALTITUDE;
 
 	} else {
-		PX4_INFO("CONTROL MODE OTHER");
+		//PX4_INFO("CONTROL MODE OTHER");
 		_control_mode_current = FW_POSCTRL_MODE_OTHER;
 	}
 }
@@ -1009,7 +1009,9 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 void
 FixedwingPositionControl::control_auto_kamikaze(const float control_interval){
 {
-
+	if (_kamikaze_mode_phase_curr == KKZ_MODE_OTHER) {
+		_kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
+	}
     switch (_kamikaze_mode_phase_curr) {
         case KKZ_MODE_APPROACHING_TO_LOITER:
             // Loiter noktasına yaklaşma işlemleri
