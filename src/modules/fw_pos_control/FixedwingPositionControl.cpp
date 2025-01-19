@@ -151,7 +151,7 @@ FixedwingPositionControl::parameters_update()
 	_tecs.set_airspeed_filter_process_std_dev(_param_process_noise_standard_dev.get());
 
 	//Kamikaze params
-	_kkz_target_lat   = _param_kkz_qr_lat.get();
+/* 	_kkz_target_lat   = _param_kkz_qr_lat.get();
 	_kkz_target_lat   = _param_kkz_qr_lon.get();
 	_kkz_dive_alt     = _param_kkz_dive_alt.get();
 	_kkz_rec_alt      = _param_kkz_rec_alt.get();
@@ -162,7 +162,7 @@ FixedwingPositionControl::parameters_update()
 	_kkz_ret_lat      = _param_kkz_ret_lat.get();
 	_kkz_ret_lon      = _param_kkz_ret_lon.get();
 	_heading_range    = _param_heading_range.get();
-	_target_dist_sp   = _param_target_dist_sp.get();
+	_target_dist_sp   = _param_target_dist_sp.get(); */
 
 
 	_performance_model.runSanityChecks();
@@ -696,6 +696,12 @@ FixedwingPositionControl::updateManualTakeoffStatus()
 void
 FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 {
+	/* If switching from kamikaze to another mode, reset kamikaze phase */
+	if (_control_mode_current != FW_POSCTRL_MODE_AUTO_KAMIKAZE && _control_mode.flag_control_kamikaze_enable) {
+		_kamikaze_mode_phase_curr = KKZ_MODE_OTHER;
+		loiter_start_time = hrt_absolute_time();
+		PX4_INFO("First Start time:%" PRIu64 "\n", loiter_start_time);
+	}
 	/* only run position controller in fixed-wing mode and during transitions for VTOL */
 	if (_vehicle_status.vehicle_type == vehicle_status_s::VEHICLE_TYPE_ROTARY_WING && !_vehicle_status.in_transition_mode) {
 		_control_mode_current = FW_POSCTRL_MODE_OTHER;
@@ -723,6 +729,11 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 		}
 
 	PX4_INFO("OFFBOARD ENABLE");
+
+	}
+	else if(_control_mode.flag_control_kamikaze_enable){
+		//PX4_INFO("CONTROL KAMIKAZE ENABLE");
+		_control_mode_current = FW_POSCTRL_MODE_AUTO_KAMIKAZE;
 	}
 	else if ((_control_mode.flag_control_auto_enabled && _control_mode.flag_control_position_enabled)
 		   && (_position_setpoint_current_valid
@@ -769,13 +780,11 @@ FixedwingPositionControl::set_control_mode_current(const hrt_abstime &now)
 			_control_mode_current = FW_POSCTRL_MODE_AUTO;
 		}
 
-	//PX4_INFO("VALID SETPOINT MISSION ENABLE:%" PRIu64 "\n", hrt_absolute_time());
-	}
-	else if(_control_mode.flag_control_kamikaze_enable){
-		PX4_INFO("CONTROL KAMIKAZE ENABLE");
-		_control_mode_current = FW_POSCTRL_MODE_AUTO_KAMIKAZE;
+	PX4_INFO("VALID SETPOINT MISSION ENABLE:%" PRIu64 "\n", hrt_absolute_time());
 
-	}else if (_control_mode.flag_control_auto_enabled
+	}
+
+	else if (_control_mode.flag_control_auto_enabled
 		   && _control_mode.flag_control_climb_rate_enabled
 		   && _control_mode.flag_armed // only enter this modes if armed, as pure failsafe modes
 		   && !_control_mode.flag_control_position_enabled) {
@@ -1006,69 +1015,83 @@ FixedwingPositionControl::control_auto_fixed_bank_alt_hold(const float control_i
 
 }
 
+
 void
-FixedwingPositionControl::control_auto_kamikaze(const float control_interval){
-{
+FixedwingPositionControl::control_auto_kamikaze(const float control_interval, const Vector2d &curr_pos,
+					   const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,
+					   const position_setpoint_s &pos_sp_next){
+
+	float dist_to_exit_point = get_distance_to_next_waypoint(curr_pos(0), curr_pos(1),
+				  pos_sp_prev.lat, pos_sp_prev.lon);
+	heading = mapAngleTo360_deg(_yaw);
+	float target_heading = fmod(_param_kkz_approach_ang.get() + 180.0f, 360.0f);
 	if (_kamikaze_mode_phase_curr == KKZ_MODE_OTHER) {
 		_kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
 	}
-    switch (_kamikaze_mode_phase_curr) {
-        case KKZ_MODE_APPROACHING_TO_LOITER:
-            // Loiter noktasına yaklaşma işlemleri
-            if (loiter_approach_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_LOITERING;
-            }
-            break;
 
-        case KKZ_MODE_LOITERING:
-            // Loiter noktası etrafında dönme işlemleri
-	    loiter_exit_conditions_met=false;
-            if (loiter_exit_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_FLYING_TO_TARGET;
-            }
-            break;
+	switch (_kamikaze_mode_phase_curr) {
 
-        case KKZ_MODE_FLYING_TO_TARGET:
-            // Hedefe doğru uçuş işlemleri
-	    target_approach_conditions_met =false;
-            if (target_approach_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_DIVING;
-            }
-            break;
+		case KKZ_MODE_APPROACHING_TO_LOITER: {
+			// Loiter noktasına yaklaşma işlemleri
+			control_auto(control_interval, curr_pos, ground_speed, pos_sp_prev, pos_sp_curr, pos_sp_next);
+/* 			PX4_INFO("Distance to exit point:%f",dist_to_exit_point);
+			PX4_INFO("Heading:%f",heading);
+			PX4_INFO("fabs(_param_kkz_approach_ang.get()-heading):%f",fabs(target_heading-heading)); */
+			hrt_abstime now = hrt_absolute_time();
+			hrt_abstime loiter_time = (now-loiter_start_time);
 
-        case KKZ_MODE_DIVING:
-            // Dalış işlemleri
-	    dive_completion_conditions_met=false;
-            if (dive_completion_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_RECOVERING;
-            }
-            break;
+			if (loiter_time > 10 && dist_to_exit_point < 10.0f && fabs(target_heading-heading)<5.0f) {
+				_kamikaze_mode_phase_curr = KKZ_MODE_FLYING_TO_TARGET;
+			}
+			break;
+		}
 
-        case KKZ_MODE_RECOVERING:
-            // Kurtarma işlemleri
-	    recovery_completion_conditions_met=false;
-            if (recovery_completion_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_RETURN_TO_SAFE_POINT;
-            }
-            break;
+		case KKZ_MODE_FLYING_TO_TARGET: {
+			// Hedefe doğru uçuş işlemleri
+			PX4_INFO("FLYING TO TARGET");
+			target_approach_conditions_met =false;
+			if (target_approach_conditions_met) {
+				_kamikaze_mode_phase_curr = KKZ_MODE_DIVING;
+			}
+			break;
+		}
 
-        case KKZ_MODE_RETURN_TO_SAFE_POINT:
-            // Güvenli noktaya dönüş işlemleri
-	    return_completion_conditions_met=false;
-            if (return_completion_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_OTHER;
-            }
-            break;
+		case KKZ_MODE_DIVING: {
+			// Dalış işlemleri
+			dive_completion_conditions_met=false;
+			if (dive_completion_conditions_met) {
+				_kamikaze_mode_phase_curr = KKZ_MODE_RECOVERING;
+			}
+			break;
+		}
 
-        case KKZ_MODE_OTHER:
-            // Diğer durumlar için işlemler
-	    mission_start_conditions_met=false;
-            if (mission_start_conditions_met) {
-                _kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
-            }
-            break;
-    }
-}
+		case KKZ_MODE_RECOVERING: {
+			// Kurtarma işlemleri
+			recovery_completion_conditions_met=false;
+			if (recovery_completion_conditions_met) {
+				_kamikaze_mode_phase_curr = KKZ_MODE_RETURN_TO_SAFE_POINT;
+			}
+			break;
+		}
+
+		case KKZ_MODE_RETURN_TO_SAFE_POINT: {
+			// Güvenli noktaya dönüş işlemleri
+			return_completion_conditions_met=false;
+			if (return_completion_conditions_met) {
+				_kamikaze_mode_phase_curr = KKZ_MODE_OTHER;
+			}
+			break;
+		}
+
+		case KKZ_MODE_OTHER: {
+			// Diğer durumlar için işlemler
+			mission_start_conditions_met=false;
+			if (mission_start_conditions_met) {
+				_kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
+			}
+			break;
+		}
+	}
 }
 
 void
@@ -1401,7 +1424,6 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 	float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
 
 	float alt_sp = pos_sp_curr.alt;
-
 	if (_landing_abort_status) {
 		if (pos_sp_curr.alt - _current_altitude  < kClearanceAltitudeBuffer) {
 			// aborted landing complete, normal loiter over landing point
@@ -1414,7 +1436,6 @@ FixedwingPositionControl::control_auto_loiter(const float control_interval, cons
 
 		is_low_height = true; // In low-height flight, TECS will control altitude tighter
 	}
-
 	tecs_update_pitch_throttle(control_interval,
 				   alt_sp,
 				   target_airspeed,
@@ -2766,7 +2787,7 @@ FixedwingPositionControl::Run()
 			}
 
 		case FW_POSCTRL_MODE_AUTO_KAMIKAZE: {
-				control_auto_kamikaze(control_interval);
+				control_auto_kamikaze(control_interval,curr_pos,ground_speed,_pos_sp_triplet.previous,_pos_sp_triplet.current,_pos_sp_triplet.next);
 				break;
 			}
 

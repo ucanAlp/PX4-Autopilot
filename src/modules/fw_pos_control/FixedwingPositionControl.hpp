@@ -286,6 +286,8 @@ private:
 	bool return_completion_conditions_met{false};
 	bool mission_start_conditions_met{false};
 
+	hrt_abstime loiter_start_time = 0;
+
 	enum StickConfig {
 		STICK_CONFIG_SWAP_STICKS_BIT = (1 << 0),
 		STICK_CONFIG_ENABLE_AIRSPEED_SP_MANUAL_BIT = (1 << 1)
@@ -296,8 +298,14 @@ private:
 	double _current_longitude{0};
 	float _current_altitude{0.f};
 
+
+
 	double _kkz_target_lat{0};
 	double _kkz_target_lon{0};
+
+	float exit_lat{0.f};
+	float exit_lon{0.f};
+
 	float _kkz_dive_alt{0};
 	float _kkz_rec_alt{0.f};
 	float _kkz_approach_ang{0.f};
@@ -309,6 +317,7 @@ private:
 	float _heading_range{0.f};
 	float _target_dist_sp{0.f};
 
+	float heading = 0.f;
 
 	float _roll{0.f};
 	float _pitch{0.0f};
@@ -641,7 +650,11 @@ private:
 	 * @param control_interval Time since last position control call [s]
 	 */
 
-	void control_auto_kamikaze(const float control_interval);
+	void control_auto_kamikaze(const float control_interval, const Vector2d &curr_pos,
+				const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,
+				const position_setpoint_s &pos_sp_next);
+
+	//void calc_exit_pos(){};
 
 
 	/**
@@ -1118,7 +1131,6 @@ private:
 
 		(ParamFloat<px4::params::RWTO_PSP>) _param_rwto_psp,
 		(ParamBool<px4::params::FW_LAUN_DETCN_ON>) _param_fw_laun_detcn_on,
-
 		(ParamFloat<px4::params::KKZ_QR_LAT>) _param_kkz_qr_lat,
 		(ParamFloat<px4::params::KKZ_QR_LON>) _param_kkz_qr_lon,
 		(ParamFloat<px4::params::KKZ_DIVE_ALT>) _param_kkz_dive_alt,

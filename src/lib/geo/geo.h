@@ -75,6 +75,14 @@ struct crosstrack_error_s {
  */
 float get_distance_to_next_waypoint(double lat_now, double lon_now, double lat_next, double lon_next);
 
+
+/**
+ * Returns current heading between 0 and 360 degrees.
+ *
+ *
+ */
+double mapAngleTo360_deg(double angle);
+
 /**
  * Creates a new waypoint C on the line of two given waypoints (A, B) at certain distance
  * from waypoint A

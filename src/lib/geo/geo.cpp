@@ -400,3 +400,12 @@ float mavlink_wpm_distance_to_point_local(float x_now, float y_now, float z_now,
 
 	return sqrtf(dx * dx + dy * dy + dz * dz);
 }
+
+double mapAngleTo360_deg(double angle) {
+    // -180 ile 180 aralığını 0 ile 360 arasına dönüştür
+    angle*=M_RAD_TO_DEG_F;
+    if (angle < 0) {
+        return 360 + angle;
+    }
+    return angle;
+}

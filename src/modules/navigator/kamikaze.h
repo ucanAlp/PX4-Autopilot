@@ -46,8 +46,11 @@
 #include "mission_block.h"
 #include <lib/mathlib/mathlib.h>
 #include <px4_platform_common/module_params.h>
+#include <uORB/SubscriptionCallback.hpp>
 #include <uORB/SubscriptionInterval.hpp>
 #include <uORB/topics/parameter_update.h>
+#include <uORB/topics/vehicle_local_position.h>
+#include <uORB/topics/vehicle_status.h>
 using namespace time_literals;
 
 class Kamikaze : public	MissionBlock , public ModuleParams
@@ -57,29 +60,68 @@ public:
 	~Kamikaze() = default;
 	void on_activation() override;
 	void on_active() override;
-	void on_inactive() override;
-
+	//void on_inactivation() override;
 private:
 
-	/**
-	 * @brief Calculate loiter position
-	 * Calculate loiter position for the kamikaaze mission
-	 */
-	void calculate_loiter_position();
+	vehicle_local_position_s *_local_pos{nullptr};
+	float loiter_lat{0.0f};
+	float loiter_lon{0.0f};
 
+	float exit_lon{0.0f};
+	float exit_lat{0.0f};
 
+	float kkz_qr_lat{0.0f};
+	float kkz_qr_lon{0.0f};
+	float kkz_approach_ang{0.0f};
+	float kkz_approach_dist{0.0f};
+	float kkz_loiter_rad{0.0f};
+	float kkz_dive_alt{0.0f};
+	float _theta_bearing{0.0f};
+	float _distance_to_target{0.0f};
+	float _d{0.0f};
 	/**
 	 * @brief Parameters update
 	 *
 	 * Check for parameter changes and update them if needed.
 	 */
+
+
+	/**
+	 * @brief Calculate the loiter position
+	 *
+	 * Calculate the loiter position based on the qr position, bearing and the loiter radius.
+	 */
+	void calculate_loiter_position();
+
+	/**
+	 * Calculate the loiter exit position where vehicle will start approach to target position.
+	 */
+	void calc_loiter_exit_position();
+
+	/**
+	 * @brief Loiter counter
+	 *
+	 * Count loiter to switch approach phase
+	 */
+
+
+	DEFINE_PARAMETERS(
+		(ParamFloat<px4::params::KKZ_QR_LAT>) _param_kkz_qr_lat,
+		(ParamFloat<px4::params::KKZ_QR_LON>) _param_kkz_qr_lon,
+		(ParamFloat<px4::params::KKZ_DIVE_ALT>) _param_kkz_dive_alt,
+		(ParamFloat<px4::params::KKZ_REC_ALT>) _param_kkz_rec_alt,
+		(ParamFloat<px4::params::KKZ_APPROACH_ANG>) _param_kkz_approach_ang,
+		(ParamFloat<px4::params::KKZ_APP_DIST>) _param_kkz_approach_dist,
+		(ParamFloat<px4::params::KKZ_LOITER_RAD>) _param_kkz_loiter_rad,
+		(ParamInt<px4::params::KKZ_LOITER_DIR>) _param_kkz_loiter_dir,
+		(ParamFloat<px4::params::KKZ_DIVE_ANG>) _param_kkz_dive_ang,
+		(ParamFloat<px4::params::KKZ_RET_LAT>) _param_kkz_ret_lat,
+		(ParamFloat<px4::params::KKZ_RET_LON>) _param_kkz_ret_lon,
+		(ParamFloat<px4::params::HEADING_RANGE>) _param_heading_range,
+		(ParamFloat<px4::params::TARGET_DIST_SP>) _param_target_dist_sp
+	)
+
 	void parameters_update();
 	uORB::SubscriptionInterval _parameter_update_sub{ORB_ID(parameter_update), 1_s};
-
-	float _kkz_qr_lat = _param_kkz_qr_lat.get(); /**< QR code latitude */
-	float _kkz_qr_lon = _param_kkz_qr_lon.get(); /**< QR code longitude */
-	float _kkz_loiter_rad = _param_kkz_loiter_rad.get(); /**< QR code loiter radius */
-	float _kkz_approach_distance = _param_kkz_approach_distance.get(); /**< Approach distance to the QR code */
-	float _kkz_approach_angle = _param_kkz_approach_angle.get(); /**< Approach angle to the QR code */
-
+	uORB::Subscription _local_pos_sub{ORB_ID(vehicle_local_position)};
 };
