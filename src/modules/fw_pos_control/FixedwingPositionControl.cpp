@@ -151,8 +151,8 @@ FixedwingPositionControl::parameters_update()
 	_tecs.set_airspeed_filter_process_std_dev(_param_process_noise_standard_dev.get());
 
 	//Kamikaze params
-/* 	_kkz_target_lat   = _param_kkz_qr_lat.get();
-	_kkz_target_lat   = _param_kkz_qr_lon.get();
+	_kkz_target_lat   = _param_kkz_qr_lat.get();
+	_kkz_target_lon   = _param_kkz_qr_lon.get();
 	_kkz_dive_alt     = _param_kkz_dive_alt.get();
 	_kkz_rec_alt      = _param_kkz_rec_alt.get();
 	_kkz_approach_ang = _param_kkz_approach_ang.get();
@@ -162,7 +162,7 @@ FixedwingPositionControl::parameters_update()
 	_kkz_ret_lat      = _param_kkz_ret_lat.get();
 	_kkz_ret_lon      = _param_kkz_ret_lon.get();
 	_heading_range    = _param_heading_range.get();
-	_target_dist_sp   = _param_target_dist_sp.get(); */
+	_target_dist_sp   = _param_target_dist_sp.get();
 
 
 	_performance_model.runSanityChecks();
@@ -1028,6 +1028,8 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 	if (_kamikaze_mode_phase_curr == KKZ_MODE_OTHER) {
 		_kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
 	}
+	const float dist_to_qr = get_distance_to_next_waypoint(_kkz_target_lat, _kkz_target_lon, _current_latitude,
+			 _current_longitude);
 
 	switch (_kamikaze_mode_phase_curr) {
 
@@ -1039,33 +1041,51 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 			PX4_INFO("fabs(_param_kkz_approach_ang.get()-heading):%f",fabs(target_heading-heading)); */
 			hrt_abstime now = hrt_absolute_time();
 			hrt_abstime loiter_time = (now-loiter_start_time);
-
+			//PX4_INFO("target_heading-heading:%f",fabs(target_heading-heading));
 			if (loiter_time > 10 && dist_to_exit_point < 10.0f && fabs(target_heading-heading)<5.0f) {
+
 				_kamikaze_mode_phase_curr = KKZ_MODE_FLYING_TO_TARGET;
 			}
 			break;
 		}
 
-		case KKZ_MODE_FLYING_TO_TARGET: {
-			// Hedefe doğru uçuş işlemleri
-			PX4_INFO("FLYING TO TARGET");
-			target_approach_conditions_met =false;
-			if (target_approach_conditions_met) {
+		case KKZ_MODE_FLYING_TO_TARGET:{
+			PX4_INFO("KKZ_MODE_FLYING_TO_TARGET");
+			control_auto(control_interval,curr_pos,ground_speed,pos_sp_prev,pos_sp_next,pos_sp_next);
+			const float dive_distance = _kkz_dive_alt*tan((90-_kkz_dive_ang)*M_DEG_TO_RAD);
+			if(dist_to_qr < fabs(dive_distance)+10.0f){
 				_kamikaze_mode_phase_curr = KKZ_MODE_DIVING;
 			}
 			break;
 		}
 
 		case KKZ_MODE_DIVING: {
-			// Dalış işlemleri
-			dive_completion_conditions_met=false;
-			if (dive_completion_conditions_met) {
+			PX4_INFO("KKZ_MODE_DIVING");
+			control_auto_dive(control_interval,curr_pos,ground_speed,pos_sp_prev,pos_sp_next,dist_to_qr);
+
+			// Dalış işlemleri TODO: 3D Proportional Navigation uygulaması yapılacak
+			kamikaze_pronav_status_s kamikaze_pronav_status{};
+			Vector2f xy_target_pos{_global_local_proj_ref.project(_kkz_target_lat, _kkz_target_lon)};
+			Vector2f xy_curr_pos{_local_pos.x, _local_pos.y};
+
+			Vector3f _target_pos{xy_target_pos(0),xy_target_pos(1), 0.f};
+			Vector3f _current_pos{xy_curr_pos(0), xy_curr_pos(1), fabs(_local_pos.z)};
+			Vector3f _target_vel{0.f, 0.f, 0.f};
+			Vector3f _current_vel{_local_pos.vx, _local_pos.vy, -_local_pos.vz};
+			Vector3f losRate_vec = calculateLOSRate(control_interval,_target_pos,_current_pos,_target_vel,_current_vel,_pitch);
+			kamikaze_pronav_status.timestamp = hrt_absolute_time();
+			kamikaze_pronav_status.accelcmd_x = losRate_vec(0);
+			kamikaze_pronav_status.accelcmd_y = losRate_vec(1);
+			kamikaze_pronav_status.los_angle  = losRate_vec(2);
+			_kamikaze_pronav_status_pub.publish(kamikaze_pronav_status);
+			if (fabs(_local_pos.z) < _kkz_rec_alt) {
 				_kamikaze_mode_phase_curr = KKZ_MODE_RECOVERING;
 			}
 			break;
 		}
 
 		case KKZ_MODE_RECOVERING: {
+			PX4_INFO("KKZ_MODE_RECOVERING");
 			// Kurtarma işlemleri
 			recovery_completion_conditions_met=false;
 			if (recovery_completion_conditions_met) {
@@ -1182,6 +1202,67 @@ FixedwingPositionControl::handle_setpoint_type(const position_setpoint_s &pos_sp
 	return position_sp_type;
 }
 
+
+void
+FixedwingPositionControl::control_auto_dive(const float control_interval, const Vector2d &curr_pos, const Vector2f &ground_speed,
+				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,const float &dist_to_qr){
+
+	const float acc_rad = 0.1;
+	float tecs_fw_thr_min;
+	float tecs_fw_thr_max;
+	if (pos_sp_curr.gliding_enabled) {
+		/* enable gliding with this waypoint */
+		_tecs.set_speed_weight(2.0f);
+		tecs_fw_thr_min = 0.0;
+		tecs_fw_thr_max = 0.0;
+
+	} else {
+		tecs_fw_thr_min = _param_fw_thr_min.get();
+		tecs_fw_thr_max = _param_fw_thr_max.get();
+	}
+
+	// waypoint is a plain navigation waypoint
+	float position_sp_alt = _kkz_rec_alt+float(_local_pos.ref_alt);
+
+	float target_airspeed = adapt_airspeed_setpoint(control_interval, pos_sp_curr.cruising_speed,
+				_performance_model.getMinimumCalibratedAirspeed(getLoadFactor()), ground_speed);
+	Vector2f curr_pos_local{_local_pos.x, _local_pos.y};
+	Vector2f curr_wp_local = _global_local_proj_ref.project(pos_sp_curr.lat, pos_sp_curr.lon);
+	_npfg.setAirspeedNom(target_airspeed * _eas2tas);
+	_npfg.setAirspeedMax(_performance_model.getMaximumCalibratedAirspeed() * _eas2tas);
+	Vector2f prev_wp_local = _global_local_proj_ref.project(pos_sp_prev.lat, pos_sp_prev.lon);
+	navigateWaypoints(prev_wp_local, curr_wp_local, curr_pos_local, ground_speed, _wind_vel);
+	float roll_body = getCorrectedNpfgRollSetpoint();
+	target_airspeed = _npfg.getAirspeedRef() / _eas2tas;
+
+	float yaw_body = _yaw; // yaw is not controlled, so set setpoint to current yaw
+
+	const bool is_low_height = checkLowHeightConditions();
+
+	tecs_update_pitch_throttle(control_interval,
+				   position_sp_alt,
+				   target_airspeed,
+				   radians(_param_fw_p_lim_min.get()),
+				   radians(_param_fw_p_lim_max.get()),
+				   tecs_fw_thr_min,
+				   tecs_fw_thr_max,
+				   _param_sinkrate_target.get(),
+				   _param_climbrate_target.get(),
+				   is_low_height);
+
+
+	const float pitch_body = -((M_PI_2_F)-atan(dist_to_qr/-_local_pos.z));
+	PX4_INFO("-_local_pos.z:%f",-_local_pos.z);
+	PX4_INFO("atan:%f",atan(dist_to_qr/-_local_pos.z));
+	PX4_INFO("Pitch:%f",pitch_body);
+	PX4_INFO("Roll:%f",roll_body);
+	PX4_INFO("Yaw:%f",yaw_body);
+	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
+	attitude_setpoint.copyTo(_att_sp.q_d);
+
+}
+
+
 void
 FixedwingPositionControl::control_auto_position(const float control_interval, const Vector2d &curr_pos,
 		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr)
@@ -1275,6 +1356,7 @@ FixedwingPositionControl::control_auto_position(const float control_interval, co
 	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
 	attitude_setpoint.copyTo(_att_sp.q_d);
 }
+
 
 void
 FixedwingPositionControl::control_auto_velocity(const float control_interval, const Vector2d &curr_pos,

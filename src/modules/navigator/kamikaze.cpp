@@ -29,15 +29,6 @@ void Kamikaze::on_activation()
 
 void Kamikaze::on_active()
 {
-	//PX4_INFO("Kamikaze mission active");
-/* 	position_setpoint_triplet_s *reposition_triplet = _navigator->get_reposition_triplet();
-	_navigator->reset_position_setpoint(reposition_triplet->previous);
-	_navigator->reset_position_setpoint(reposition_triplet->current);
-	_navigator->reset_position_setpoint(reposition_triplet->next); */
-/* 	_navigator->get_mission_result()->finished = true;
-	_navigator->set_mission_result_updated();
-	_navigator->mode_completed(getNavigatorStateId()); */
-
 	parameters_update();
 }
 
@@ -69,13 +60,18 @@ void Kamikaze::calculate_loiter_position()
 	struct position_setpoint_triplet_s *pos_sp_triplet = _navigator->get_position_setpoint_triplet();
 	pos_sp_triplet->previous.lat = exit_lat*M_RAD_TO_DEG_F;
 	pos_sp_triplet->previous.lon = exit_lon*M_RAD_TO_DEG_F;
+	pos_sp_triplet->previous.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
 	pos_sp_triplet->current.lat = loiter_lat*M_RAD_TO_DEG_F;
 	pos_sp_triplet->current.lon = loiter_lon*M_RAD_TO_DEG_F;
 	pos_sp_triplet->current.alt = kkz_dive_alt+_navigator->get_home_position()->alt;
 	pos_sp_triplet->current.loiter_radius = kkz_loiter_rad;
 	pos_sp_triplet->current.loiter_direction_counter_clockwise = _param_kkz_loiter_dir.get();
 	pos_sp_triplet->current.type = position_setpoint_s::SETPOINT_TYPE_LOITER;
-
+	pos_sp_triplet->next.lat = kkz_qr_lat*M_RAD_TO_DEG_F;
+	pos_sp_triplet->next.lon = kkz_qr_lon*M_RAD_TO_DEG_F;
+	pos_sp_triplet->next.alt = kkz_dive_alt+_navigator->get_home_position()->alt;
+	pos_sp_triplet->next.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
+	_navigator->set_position_setpoint_triplet_updated();
 
 }
 

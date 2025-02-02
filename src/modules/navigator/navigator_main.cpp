@@ -115,8 +115,10 @@ Navigator::Navigator() :
 	_distance_sensor_mode_change_request_pub.get().timestamp = hrt_absolute_time();
 	_distance_sensor_mode_change_request_pub.get().request_on_off = distance_sensor_mode_change_request_s::REQUEST_OFF;
 	_distance_sensor_mode_change_request_pub.update();
-
+	PX4_INFO("Navigator initialized");
 	reset_triplets();
+
+
 }
 
 Navigator::~Navigator()
@@ -896,10 +898,12 @@ void Navigator::run()
 		/* if nothing is running, set position setpoint triplet invalid once */
 		if (_navigation_mode == nullptr && !_pos_sp_triplet_published_invalid_once) {
 			_pos_sp_triplet_published_invalid_once = true;
+			PX4_INFO("NO NAVIGATION RUNNING");
 			reset_triplets();
 		}
 
 		if (_pos_sp_triplet_updated) {
+			PX4_INFO("position setpoint updated in navigator main");
 			publish_position_setpoint_triplet();
 		}
 
@@ -1116,6 +1120,7 @@ int Navigator::print_status()
 
 void Navigator::publish_position_setpoint_triplet()
 {
+	PX4_INFO("publish_position_setpoint_triplet");
 	_pos_sp_triplet.timestamp = hrt_absolute_time();
 	_pos_sp_triplet_pub.publish(_pos_sp_triplet);
 	_pos_sp_triplet_updated = false;
@@ -1171,7 +1176,7 @@ void Navigator::reset_triplets()
 	reset_position_setpoint(_pos_sp_triplet.previous);
 	reset_position_setpoint(_pos_sp_triplet.current);
 	reset_position_setpoint(_pos_sp_triplet.next);
-
+	PX4_INFO("reset_triplets");
 	_pos_sp_triplet_updated = true;
 }
 

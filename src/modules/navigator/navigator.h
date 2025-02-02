@@ -152,7 +152,10 @@ public:
 	/**
 	 * Setters
 	 */
-	void set_position_setpoint_triplet_updated() { _pos_sp_triplet_updated = true; }
+	void set_position_setpoint_triplet_updated() {
+		 PX4_INFO("_pos_sp_triplet_updated : %d", _pos_sp_triplet_updated);
+		 _pos_sp_triplet_updated = true;
+		 }
 	void set_mission_result_updated() { _mission_result_updated = true; }
 
 	/**

@@ -43,9 +43,8 @@
  */
 
 #include "geo.h"
-
 #include <float.h>
-
+#include <px4_platform_common/events.h>
 using matrix::wrap_pi;
 using matrix::wrap_2pi;
 
@@ -409,3 +408,51 @@ double mapAngleTo360_deg(double angle) {
     }
     return angle;
 }
+
+matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Vector3f &target_pos, const matrix::Vector3f &curr_pos, const matrix::Vector3f &target_vel,  const matrix::Vector3f &curr_vel,float &_pitch) {
+    float vehicle_speed = sqrtf(curr_vel(0) * curr_vel(0) + curr_vel(1) * curr_vel(1) + curr_vel(2) * curr_vel(2));
+
+    float relPosX = target_pos(0) - curr_pos(0);
+    float relPosY = target_pos(1) - curr_pos(1);
+    float planarDistance = sqrtf(relPosX * relPosX + relPosY * relPosY);
+
+    float relPosZ = target_pos(2) - curr_pos(2);
+
+    float relDistance = sqrtf(planarDistance * planarDistance + relPosZ * relPosZ);
+    float relVelX = target_vel(0) - curr_vel(0);
+    float relVelY = target_vel(2) - curr_vel(2);
+
+    float closingVelocity = -(planarDistance * relVelX + relPosZ * relVelY) / relDistance;
+    float finalFlightPathRad = -45 / 57.3;
+    float maxAccelG = 3*CONSTANTS_ONE_G;
+    float LOS_Angle = atan2(relPosZ, planarDistance);
+    float losRate = (planarDistance * relVelY - relPosZ * relVelX) / (relDistance*relDistance);
+    float TGO = relDistance / closingVelocity;
+    float accelCmd = 4.0 * closingVelocity * losRate + 2.0 * closingVelocity * (LOS_Angle - finalFlightPathRad) / TGO;
+    accelCmd = math::constrain(accelCmd, -maxAccelG, maxAccelG);
+    float accelCmd_X = -accelCmd * sin(LOS_Angle);
+    float accelCmd_Y = accelCmd * cos(LOS_Angle);
+    float desiredPitchRate = accelCmd_Y / vehicle_speed;
+    float thetaRef = _pitch + desiredPitchRate*control_interval;
+    return matrix::Vector3f(accelCmd_X, accelCmd_Y, thetaRef);
+
+}
+
+
+
+
+
+
+void calculateRollAndPitch(float azimuthRate, float elevationRate, float speed, float &roll, float &pitch) {
+ const float N = 4.0f;   // Navigasyon sabiti (3-5 arası tipik)
+    const float g = 9.81f;  // Yerçekimi ivmesi (m/s²)
+
+    // Azimuth ve Elevation yönlerinde ivme hesapla
+    float acceleration_azimuth = N * speed * azimuthRate;
+    float acceleration_elevation = N * speed * elevationRate;
+
+    // İvmeyi açıya dönüştür (a = g * tan(θ) → θ = arctan(a/g))
+    roll =  std::atan(acceleration_azimuth * 1.0f / CONSTANTS_ONE_G);
+    pitch = std::atan(acceleration_elevation = N * speed * elevationRate);
+}
+

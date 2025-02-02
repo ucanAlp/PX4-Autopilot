@@ -98,6 +98,7 @@
 #include <uORB/topics/wind.h>
 #include <uORB/topics/orbit_status.h>
 #include <uORB/uORB.h>
+#include <uORB/topics/kamikaze_pronav_status.h>
 
 #ifdef CONFIG_FIGURE_OF_EIGHT
 #include "figure_eight/FigureEight.hpp"
@@ -228,6 +229,7 @@ private:
 	uORB::Publication<landing_gear_s> _landing_gear_pub {ORB_ID(landing_gear)};
 	uORB::Publication<normalized_unsigned_setpoint_s> _flaps_setpoint_pub{ORB_ID(flaps_setpoint)};
 	uORB::Publication<normalized_unsigned_setpoint_s> _spoilers_setpoint_pub{ORB_ID(spoilers_setpoint)};
+	uORB::Publication<kamikaze_pronav_status_s> _kamikaze_pronav_status_pub{ORB_ID(kamikaze_pronav_status)};
 	uORB::PublicationData<flight_phase_estimation_s> _flight_phase_estimation_pub{ORB_ID(flight_phase_estimation)};
 
 	manual_control_setpoint_s _manual_control_setpoint{};
@@ -654,9 +656,6 @@ private:
 				const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,
 				const position_setpoint_s &pos_sp_next);
 
-	//void calc_exit_pos(){};
-
-
 	/**
 	 * @brief Check that defined kamikaze mission is feasible or not.
 	 *
@@ -666,17 +665,6 @@ private:
 	 */
 
 	void kamikaze_feasiblity_checker(const float control_interval);
-
-
-	/**
-	 * @brief Control diving phase. For now only based on gps position.
-	 *
-	 * TODO: Add vision based diving, if user publish target x,y location on image.
-	 *
-	 * @param control_interval Time since last position control call [s]
-	 */
-
-	void control_kamikaze_dive(const float control_interval);
 
 	/**
 	 * @brief Vehicle control for position waypoints.
@@ -689,6 +677,23 @@ private:
 	 */
 	void control_auto_position(const float control_interval, const Vector2d &curr_pos, const Vector2f &ground_speed,
 				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr);
+
+
+
+	/**
+	 *
+	 * control auto kamikaze diving phase
+	 * @param control_interval Time since last position control call [s]
+	 * @param curr_pos Current 2D local position vector of vehicle [m]
+	 * @param ground_speed Local 2D ground speed of vehicle [m/s]
+	 * @param pos_sp_prev previous position setpoint
+	 * @param pos_sp_curr current position setpoint
+	 * @param dive_angle dive angle for kamikaze
+	 *
+	 */
+	void control_auto_dive(const float control_interval, const Vector2d &curr_pos, const Vector2f &ground_speed,
+				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,const float &dist_to_qr);
+
 
 	/**
 	 * @brief Vehicle control for loiter waypoints.
@@ -886,7 +891,7 @@ private:
 
 	/**
 	 * @brief Calculates the vector from landing approach entrance to touchdown point
-	 *
+	 *a
 	 * NOTE: calculateTouchdownPosition() MUST be called before this method
 	 *
 	 * @return Landing approach vector [m]
