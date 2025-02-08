@@ -327,8 +327,6 @@ void FixedwingAttitudeControl::Run()
 				const Eulerf setpoint(Quatf(_att_sp.q_d));
 				const float roll_body = setpoint.phi();
 				const float pitch_body = setpoint.theta();
-				PX4_INFO("pitch_body = %f", pitch_body);
-				PX4_INFO("roll_body = %f", roll_body);
 
 				if (PX4_ISFINITE(roll_body) && PX4_ISFINITE(pitch_body)) {
 

@@ -409,7 +409,7 @@ double mapAngleTo360_deg(double angle) {
     return angle;
 }
 
-matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Vector3f &target_pos, const matrix::Vector3f &curr_pos, const matrix::Vector3f &target_vel,  const matrix::Vector3f &curr_vel,float &_pitch) {
+matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Vector3f &target_pos, const matrix::Vector3f &curr_pos, const matrix::Vector3f &target_vel,  const matrix::Vector3f &curr_vel,float &_pitch, float N) {
     float vehicle_speed = sqrtf(curr_vel(0) * curr_vel(0) + curr_vel(1) * curr_vel(1) + curr_vel(2) * curr_vel(2));
 
     float relPosX = target_pos(0) - curr_pos(0);
@@ -419,7 +419,7 @@ matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Ve
     float relPosZ = target_pos(2) - curr_pos(2);
 
     float relDistance = sqrtf(planarDistance * planarDistance + relPosZ * relPosZ);
-    float relVelX = target_vel(0) - curr_vel(0);
+    float relVelX = target_vel(0) - sqrt(curr_vel(0)*curr_vel(0) + curr_vel(1)*curr_vel(1));
     float relVelY = target_vel(2) - curr_vel(2);
 
     float closingVelocity = -(planarDistance * relVelX + relPosZ * relVelY) / relDistance;
@@ -428,13 +428,14 @@ matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Ve
     float LOS_Angle = atan2(relPosZ, planarDistance);
     float losRate = (planarDistance * relVelY - relPosZ * relVelX) / (relDistance*relDistance);
     float TGO = relDistance / closingVelocity;
-    float accelCmd = 4.0 * closingVelocity * losRate + 2.0 * closingVelocity * (LOS_Angle - finalFlightPathRad) / TGO;
+    //float accelCmd = N * closingVelocity * losRate + 2.0 * closingVelocity * (LOS_Angle - finalFlightPathRad) / TGO;
+    float accelCmd = N * vehicle_speed * losRate;
     accelCmd = math::constrain(accelCmd, -maxAccelG, maxAccelG);
     float accelCmd_X = -accelCmd * sin(LOS_Angle);
     float accelCmd_Y = accelCmd * cos(LOS_Angle);
     float desiredPitchRate = accelCmd_Y / vehicle_speed;
-    float thetaRef = _pitch + desiredPitchRate*control_interval;
-    return matrix::Vector3f(accelCmd_X, accelCmd_Y, thetaRef);
+    float thetaRef = _pitch - 0.0174f;
+    return matrix::Vector3f(_pitch, -desiredPitchRate,thetaRef);
 
 }
 

@@ -692,7 +692,7 @@ private:
 	 *
 	 */
 	void control_auto_dive(const float control_interval, const Vector2d &curr_pos, const Vector2f &ground_speed,
-				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,const float &dist_to_qr);
+				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,const float &dist_to_qr, const float &pitch_ref);
 
 
 	/**
