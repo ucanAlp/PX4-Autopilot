@@ -160,7 +160,8 @@ float mavlink_wpm_distance_to_point_local(float x_now, float y_now, float z_now,
  * @param target_vel Target velocity vector [m/s]
  * @param curr_vel Current velocity vector [m/s]
  */
-matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Vector3f &target_pos, const matrix::Vector3f &curr_pos, const matrix::Vector3f &target_vel,  const matrix::Vector3f &curr_vel,float &pitch,float N);
+matrix::Vector3f calculateLOSRate(const float control_interval, const matrix::Vector3f &target_pos, const matrix::Vector3f &curr_pos,
+				  const matrix::Vector3f &target_vel,  const matrix::Vector3f &curr_vel,float &pitch,float N,bool reset_flag);
 
 
 /**

@@ -163,6 +163,7 @@ FixedwingPositionControl::parameters_update()
 	_kkz_ret_lon      = _param_kkz_ret_lon.get();
 	_heading_range    = _param_heading_range.get();
 	_target_dist_sp   = _param_target_dist_sp.get();
+	_kkz_rec_g	  = _param_kkz_rec_g.get();
 
 
 	_performance_model.runSanityChecks();
@@ -1026,6 +1027,7 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 	heading = mapAngleTo360_deg(_yaw);
 	float target_heading = fmod(_param_kkz_approach_ang.get() + 180.0f, 360.0f);
 	if (_kamikaze_mode_phase_curr == KKZ_MODE_OTHER) {
+		calculateLOSRate(0.0f, {}, {}, {}, {}, _pitch, 0.0f, true);
 		_kamikaze_mode_phase_curr = KKZ_MODE_APPROACHING_TO_LOITER;
 	}
 	const float dist_to_qr = get_distance_to_next_waypoint(_kkz_target_lat, _kkz_target_lon, _current_latitude,
@@ -1050,33 +1052,15 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 		}
 
 		case KKZ_MODE_FLYING_TO_TARGET:{
-			PX4_INFO("KKZ_MODE_FLYING_TO_TARGET");
 			control_auto(control_interval,curr_pos,ground_speed,pos_sp_prev,pos_sp_next,pos_sp_next);
-			kamikaze_pronav_status_s kamikaze_pronav_status{};
-			Vector2f xy_target_pos{_global_local_proj_ref.project(_kkz_target_lat, _kkz_target_lon)};
-			Vector2f xy_curr_pos{_local_pos.x, _local_pos.y};
 
-			Vector3f _target_pos{xy_target_pos(0),xy_target_pos(1), 0.f};
-			Vector3f _current_pos{xy_curr_pos(0), xy_curr_pos(1), fabs(_local_pos.z)};
-			Vector3f _target_vel{0.f, 0.f, 0.f};
-			Vector3f _current_vel{_local_pos.vx, _local_pos.vy, -_local_pos.vz};
-			float N = _param_heading_range.get();
-			Vector3f losRate_vec = calculateLOSRate(control_interval,_target_pos,_current_pos,_target_vel,_current_vel,_pitch,N);
-			kamikaze_pronav_status.timestamp = hrt_absolute_time();
-			kamikaze_pronav_status.accelcmd_x = losRate_vec(0);
-			kamikaze_pronav_status.accelcmd_y = losRate_vec(1);
-			kamikaze_pronav_status.los_angle  = losRate_vec(2);
-			float pitch_ref = kamikaze_pronav_status.los_angle;
-			_kamikaze_pronav_status_pub.publish(kamikaze_pronav_status);
 			const float dive_distance = _kkz_dive_alt*tan((90-_kkz_dive_ang)*M_DEG_TO_RAD);
 			if(dist_to_qr < fabs(dive_distance)+10.0f){
 				_kamikaze_mode_phase_curr = KKZ_MODE_DIVING;
 			}
 			break;
 		}
-
 		case KKZ_MODE_DIVING: {
-			PX4_INFO("KKZ_MODE_DIVING");
 			// Dalış işlemleri TODO: 3D Proportional Navigation uygulaması yapılacak
 			kamikaze_pronav_status_s kamikaze_pronav_status{};
 			Vector2f xy_target_pos{_global_local_proj_ref.project(_kkz_target_lat, _kkz_target_lon)};
@@ -1087,14 +1071,13 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 			Vector3f _target_vel{0.f, 0.f, 0.f};
 			Vector3f _current_vel{_local_pos.vx, _local_pos.vy, -_local_pos.vz};
 			float N = _param_heading_range.get();
-			Vector3f losRate_vec = calculateLOSRate(control_interval,_target_pos,_current_pos,_target_vel,_current_vel,_pitch,N);
+			Vector3f losRate_vec = calculateLOSRate(control_interval,_target_pos,_current_pos,_target_vel,_current_vel,_pitch,N,false);
 			kamikaze_pronav_status.timestamp = hrt_absolute_time();
 			kamikaze_pronav_status.accelcmd_x = losRate_vec(0);
 			kamikaze_pronav_status.accelcmd_y = losRate_vec(1);
 			kamikaze_pronav_status.los_angle  = losRate_vec(2);
 			float pitch_ref = kamikaze_pronav_status.los_angle;
 			_kamikaze_pronav_status_pub.publish(kamikaze_pronav_status);
-
 			control_auto_dive(control_interval,curr_pos,ground_speed,pos_sp_prev,pos_sp_next,dist_to_qr,pitch_ref);
 
 
@@ -1106,9 +1089,9 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 
 		case KKZ_MODE_RECOVERING: {
 			PX4_INFO("KKZ_MODE_RECOVERING");
+			control_auto(control_interval, curr_pos, ground_speed, pos_sp_prev, pos_sp_curr, pos_sp_next);
 			// Kurtarma işlemleri
-			recovery_completion_conditions_met=false;
-			if (recovery_completion_conditions_met) {
+			if (fabs(_local_pos.z) > _kkz_rec_alt) {
 				_kamikaze_mode_phase_curr = KKZ_MODE_RETURN_TO_SAFE_POINT;
 			}
 			break;
@@ -1222,7 +1205,25 @@ FixedwingPositionControl::handle_setpoint_type(const position_setpoint_s &pos_sp
 	return position_sp_type;
 }
 
+//TO DO: Implememnt this directly in fw rate controller
+float
+FixedwingPositionControl::control_auto_recovery(const float control_interval,const float &vehicle_speed,const bool &reset_flag){
+	float desiredPitchRate = (_param_kkz_rec_g.get()*CONSTANTS_ONE_G) / vehicle_speed;
 
+	static float _pitch_ref = 0.0f;  // İlk çağrıda sıfır başlatılır
+	if (_pitch_ref == 0.0f) {  // İlk çağrıda _pitch ile başlat
+	_pitch_ref = _pitch;
+	}
+	if(reset_flag){
+		_pitch_ref = 0.0f;
+		return 0.0f;
+	}
+	_pitch_ref -= desiredPitchRate * control_interval;
+
+
+}
+
+//TO DO: Implememnt this directly in fw rate controller
 void
 FixedwingPositionControl::control_auto_dive(const float control_interval, const Vector2d &curr_pos, const Vector2f &ground_speed,
 				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,const float &dist_to_qr,const float &pitch_ref){
@@ -1270,7 +1271,7 @@ FixedwingPositionControl::control_auto_dive(const float control_interval, const 
 				   _param_climbrate_target.get(),
 				   is_low_height);
 
-	const float pitch_body = pitch_ref*M_RAD_TO_DEG_F;
+	const float pitch_body = pitch_ref*M_DEG_TO_RAD;
 	//const float pitch_body = -((M_PI_2_F)-atan(dist_to_qr/-_local_pos.z));
 	PX4_INFO("-_local_pos.z:%f",-_local_pos.z);
 	PX4_INFO("atan:%f",atan(dist_to_qr/-_local_pos.z));

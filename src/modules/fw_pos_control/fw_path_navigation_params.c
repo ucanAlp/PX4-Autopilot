@@ -1030,6 +1030,16 @@ PARAM_DEFINE_FLOAT(KKZ_DIVE_ALT, 100.f);
  */
 PARAM_DEFINE_FLOAT(KKZ_REC_ALT, 100.f);
 
+/**
+ * Desired g limit for recovery phase
+ * @unit m
+ * @min 1
+ * @decimal 1
+ * @increment 0.1
+ * @group Kamikaze
+ */
+PARAM_DEFINE_FLOAT(KKZ_REC_G, 2.0f);
+
 
 /**
  * Kamikaze heading angle offset to increment counter

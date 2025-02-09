@@ -310,6 +310,7 @@ private:
 
 	float _kkz_dive_alt{0};
 	float _kkz_rec_alt{0.f};
+	float _kkz_rec_g{0.f};
 	float _kkz_approach_ang{0.f};
 	int8_t _kkz_loiter_dir{1};
 	float  _kkz_loiter_rad{0.f};
@@ -694,6 +695,14 @@ private:
 	void control_auto_dive(const float control_interval, const Vector2d &curr_pos, const Vector2f &ground_speed,
 				   const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr,const float &dist_to_qr, const float &pitch_ref);
 
+	/**
+	 *
+	 * control auto kamikaze recovering phase
+	 * @param control_interval Time since last position control call [s]
+	 * @param vehicle_speed Local 3D speed of vehicle [m/s]
+	 * @param reset_flag reset flag for recovery pitch reference
+	 */
+	float control_auto_recovery(const float control_interval,const float &vehicle_speed,const bool &reset_flag);
 
 	/**
 	 * @brief Vehicle control for loiter waypoints.
@@ -1140,6 +1149,7 @@ private:
 		(ParamFloat<px4::params::KKZ_QR_LON>) _param_kkz_qr_lon,
 		(ParamFloat<px4::params::KKZ_DIVE_ALT>) _param_kkz_dive_alt,
 		(ParamFloat<px4::params::KKZ_REC_ALT>) _param_kkz_rec_alt,
+		(ParamFloat<px4::params::KKZ_REC_G>) _param_kkz_rec_g,
 		(ParamFloat<px4::params::KKZ_APPROACH_ANG>) _param_kkz_approach_ang,
 		(ParamFloat<px4::params::KKZ_APP_DIST>) _param_kkz_approach_dist,
 		(ParamFloat<px4::params::KKZ_LOITER_RAD>) _param_kkz_loiter_rad,
