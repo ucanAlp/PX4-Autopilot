@@ -238,6 +238,7 @@ private:
 	vehicle_control_mode_s _control_mode{};
 	vehicle_local_position_s _local_pos{};
 	vehicle_status_s _vehicle_status{};
+	kamikaze_pronav_status_s kamikaze_pronav_status{};
 
 	Vector2f _lpos_where_backtrans_started;
 
@@ -277,6 +278,11 @@ private:
 		KKZ_MODE_RETURN_TO_SAFE_POINT,
 		KKZ_MODE_OTHER
 	}_kamikaze_mode_phase_curr{KKZ_MODE_OTHER};
+
+	enum KKY_NAV_TYPE {
+		KKZ_NAV_TRIANGLE,
+		KKZ_NAV_PRONAV
+	};
 
 
 	 // Kamikaze mode phase transition conditions
@@ -702,7 +708,7 @@ private:
 	 * @param vehicle_speed Local 3D speed of vehicle [m/s]
 	 * @param reset_flag reset flag for recovery pitch reference
 	 */
-	float control_auto_recovery(const float control_interval,const float &vehicle_speed,const bool &reset_flag);
+	void control_auto_recovery(const float control_interval, const position_setpoint_s &pos_sp_next);
 
 	/**
 	 * @brief Vehicle control for loiter waypoints.
@@ -1158,6 +1164,7 @@ private:
 		(ParamFloat<px4::params::KKZ_RET_LAT>) _param_kkz_ret_lat,
 		(ParamFloat<px4::params::KKZ_RET_LON>) _param_kkz_ret_lon,
 		(ParamFloat<px4::params::HEADING_RANGE>) _param_heading_range,
+		(ParamInt<px4::params::KKZ_NAV_TYPE>) _param_kkz_nav_type,
 		(ParamFloat<px4::params::TARGET_DIST_SP>) _param_target_dist_sp
 	)
 

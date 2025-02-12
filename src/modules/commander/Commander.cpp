@@ -369,7 +369,7 @@ int Commander::custom_command(int argc, char *argv[])
 
 			if (!strcmp(argv[1], "manual")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_MANUAL);
-
+				PX4_INFO("switching to manual mode");
 			} else if (!strcmp(argv[1], "altctl")) {
 				send_vehicle_command(vehicle_command_s::VEHICLE_CMD_DO_SET_MODE, 1, PX4_CUSTOM_MAIN_MODE_ALTCTL);
 

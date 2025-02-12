@@ -1062,10 +1062,9 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 		}
 		case KKZ_MODE_DIVING: {
 			// Dalış işlemleri TODO: 3D Proportional Navigation uygulaması yapılacak
-			kamikaze_pronav_status_s kamikaze_pronav_status{};
+ 			kamikaze_pronav_status_s kamikaze_pronav_status{};
 			Vector2f xy_target_pos{_global_local_proj_ref.project(_kkz_target_lat, _kkz_target_lon)};
 			Vector2f xy_curr_pos{_local_pos.x, _local_pos.y};
-
 			Vector3f _target_pos{xy_target_pos(0),xy_target_pos(1), 0.f};
 			Vector3f _current_pos{xy_curr_pos(0), xy_curr_pos(1), fabs(_local_pos.z)};
 			Vector3f _target_vel{0.f, 0.f, 0.f};
@@ -1077,9 +1076,7 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 			kamikaze_pronav_status.accelcmd_y = losRate_vec(1);
 			kamikaze_pronav_status.los_angle  = losRate_vec(2);
 			float pitch_ref = kamikaze_pronav_status.los_angle;
-			_kamikaze_pronav_status_pub.publish(kamikaze_pronav_status);
 			control_auto_dive(control_interval,curr_pos,ground_speed,pos_sp_prev,pos_sp_next,dist_to_qr,pitch_ref);
-
 
 			if (fabs(_local_pos.z) < _kkz_rec_alt) {
 				_kamikaze_mode_phase_curr = KKZ_MODE_RECOVERING;
@@ -1088,16 +1085,16 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 		}
 
 		case KKZ_MODE_RECOVERING: {
-			PX4_INFO("KKZ_MODE_RECOVERING");
-			control_auto(control_interval, curr_pos, ground_speed, pos_sp_prev, pos_sp_curr, pos_sp_next);
+			control_auto_recovery(control_interval,pos_sp_next);
 			// Kurtarma işlemleri
-			if (fabs(_local_pos.z) > _kkz_rec_alt) {
+			if (fabs(_local_pos.z) > _kkz_rec_alt+30.0f) {
 				_kamikaze_mode_phase_curr = KKZ_MODE_RETURN_TO_SAFE_POINT;
 			}
 			break;
 		}
 
 		case KKZ_MODE_RETURN_TO_SAFE_POINT: {
+			control_auto(control_interval, curr_pos, ground_speed, pos_sp_prev, pos_sp_curr, pos_sp_next);
 			// Güvenli noktaya dönüş işlemleri
 			return_completion_conditions_met=false;
 			if (return_completion_conditions_met) {
@@ -1115,6 +1112,10 @@ FixedwingPositionControl::control_auto_kamikaze(const float control_interval, co
 			break;
 		}
 	}
+
+	kamikaze_pronav_status.kamikaze_status = _kamikaze_mode_phase_curr;
+	_kamikaze_pronav_status_pub.publish(kamikaze_pronav_status);
+
 }
 
 void
@@ -1206,21 +1207,40 @@ FixedwingPositionControl::handle_setpoint_type(const position_setpoint_s &pos_sp
 }
 
 //TO DO: Implememnt this directly in fw rate controller
-float
-FixedwingPositionControl::control_auto_recovery(const float control_interval,const float &vehicle_speed,const bool &reset_flag){
-	float desiredPitchRate = (_param_kkz_rec_g.get()*CONSTANTS_ONE_G) / vehicle_speed;
+void
+FixedwingPositionControl::control_auto_recovery(const float control_interval,const position_setpoint_s &pos_sp_next){
+	//Copy of auto descend rate function
+	// Hard-code descend rate to 0.5m/s. This is a compromise to give the system to recover,
+	// but not letting it drift too far away.
+	const float descend_rate = 2.5f;
+	const bool disable_underspeed_handling = false;
 
-	static float _pitch_ref = 0.0f;  // İlk çağrıda sıfır başlatılır
-	if (_pitch_ref == 0.0f) {  // İlk çağrıda _pitch ile başlat
-	_pitch_ref = _pitch;
-	}
-	if(reset_flag){
-		_pitch_ref = 0.0f;
-		return 0.0f;
-	}
-	_pitch_ref -= desiredPitchRate * control_interval;
+	const bool is_low_height = checkLowHeightConditions();
 
+	tecs_update_pitch_throttle(control_interval,
+				   _current_altitude,
+				   _performance_model.getCalibratedTrimAirspeed(),
+				   radians(_param_fw_p_lim_min.get()),
+				   radians(_param_fw_p_lim_max.get()),
+				   _param_fw_thr_min.get(),
+				   _param_fw_thr_max.get(),
+				   _param_sinkrate_target.get(),
+				   _param_climbrate_target.get(),
+				   is_low_height,
+				   disable_underspeed_handling,
+				   descend_rate);
 
+	const float roll_body = math::radians(_param_nav_gpsf_r.get()); // open loop loiter bank angle
+	const float yaw_body = 0.f;
+
+	// Special case: if vz estimate is invalid we cannot control height rate anymore. To prevent a
+	// "climb-away" we set the thrust to MIN in that case.
+	_att_sp.thrust_body[0] = (_landed
+				  || !_local_pos.v_z_valid) ? _param_fw_thr_min.get() : min(get_tecs_thrust(), _param_fw_thr_max.get());
+
+	const float pitch_body = get_tecs_pitch();
+	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
+	attitude_setpoint.copyTo(_att_sp.q_d);
 }
 
 //TO DO: Implememnt this directly in fw rate controller
@@ -1271,13 +1291,13 @@ FixedwingPositionControl::control_auto_dive(const float control_interval, const 
 				   _param_climbrate_target.get(),
 				   is_low_height);
 
+	if(_param_kkz_nav_type.get() == KKZ_NAV_PRONAV){
+		const float pitch_body = pitch_ref*M_DEG_TO_RAD;
+	}
+	else{
+		const float pitch_body = -((M_PI_2_F)-atan(dist_to_qr/-_local_pos.z));
+	}
 	const float pitch_body = pitch_ref*M_DEG_TO_RAD;
-	//const float pitch_body = -((M_PI_2_F)-atan(dist_to_qr/-_local_pos.z));
-	PX4_INFO("-_local_pos.z:%f",-_local_pos.z);
-	PX4_INFO("atan:%f",atan(dist_to_qr/-_local_pos.z));
-	PX4_INFO("Pitch:%f",pitch_body);
-	PX4_INFO("Roll:%f",roll_body);
-	PX4_INFO("Yaw:%f",yaw_body);
 	const Quatf attitude_setpoint(Eulerf(roll_body, pitch_body, yaw_body));
 	attitude_setpoint.copyTo(_att_sp.q_d);
 
@@ -1286,8 +1306,7 @@ FixedwingPositionControl::control_auto_dive(const float control_interval, const 
 
 void
 FixedwingPositionControl::control_auto_position(const float control_interval, const Vector2d &curr_pos,
-		const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr)
-{	PX4_INFO("_pitch:%f",_pitch);
+	const Vector2f &ground_speed, const position_setpoint_s &pos_sp_prev, const position_setpoint_s &pos_sp_curr) {
 	const float acc_rad = _npfg.switchDistance(500.0f);
 	float tecs_fw_thr_min;
 	float tecs_fw_thr_max;

@@ -61,6 +61,7 @@ void Kamikaze::calculate_loiter_position()
 	pos_sp_triplet->previous.lat = exit_lat*M_RAD_TO_DEG_F;
 	pos_sp_triplet->previous.lon = exit_lon*M_RAD_TO_DEG_F;
 	pos_sp_triplet->previous.type = position_setpoint_s::SETPOINT_TYPE_POSITION;
+	pos_sp_triplet->previous.alt = kkz_dive_alt+_navigator->get_home_position()->alt;
 	pos_sp_triplet->current.lat = loiter_lat*M_RAD_TO_DEG_F;
 	pos_sp_triplet->current.lon = loiter_lon*M_RAD_TO_DEG_F;
 	pos_sp_triplet->current.alt = kkz_dive_alt+_navigator->get_home_position()->alt;
